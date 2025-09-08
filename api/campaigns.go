@@ -1,11 +1,12 @@
 package api
 
 import (
-	"iterable-go/logger"
-	"iterable-go/types"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/types"
 )
 
 var (

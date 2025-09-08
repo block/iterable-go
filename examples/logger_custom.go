@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	iterable_go "iterable-go"
-	"iterable-go/logger"
+	iterable_go "github.com/block/iterable-go"
+	"github.com/block/iterable-go/logger"
 )
 
 func logger_custom(apiKey string) {

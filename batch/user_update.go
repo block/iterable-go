@@ -1,10 +1,10 @@
 package batch
 
 import (
-	"iterable-go/api"
-	iterable_errors "iterable-go/errors"
-	"iterable-go/logger"
-	"iterable-go/types"
+	"github.com/block/iterable-go/api"
+	iterable_errors "github.com/block/iterable-go/errors"
+	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/types"
 )
 
 type userUpdateBatch struct {

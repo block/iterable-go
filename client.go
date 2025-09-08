@@ -3,7 +3,7 @@ package iterable_go
 import (
 	"net/http"
 
-	"iterable-go/api"
+	"github.com/block/iterable-go/api"
 )
 
 type Client struct {

@@ -1,9 +1,9 @@
 package batch
 
 import (
-	"iterable-go/api"
-	"iterable-go/logger"
-	"iterable-go/types"
+	"github.com/block/iterable-go/api"
+	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/types"
 )
 
 type subscriptionUpdateBatch struct {

@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	iterable_go "iterable-go"
-	"iterable-go/types"
+	"github.com/block/iterable-go"
+	"github.com/block/iterable-go/types"
 )
 
 func api_campaigns_create(apiKey string) {

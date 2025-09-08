@@ -3,9 +3,9 @@ package iterable_go
 import (
 	"time"
 
-	"iterable-go/batch"
-	"iterable-go/logger"
-	"iterable-go/retry"
+	"github.com/block/iterable-go/batch"
+	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/retry"
 )
 
 type batchConfig struct {

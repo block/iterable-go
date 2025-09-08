@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"iterable-go/logger"
-	"iterable-go/types"
+	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/types"
 )
 
 var (

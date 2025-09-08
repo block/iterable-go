@@ -1,4 +1,4 @@
-module iterable-go
+module github.com/block/iterable-go
 
 go 1.24.5
 

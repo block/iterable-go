@@ -6,8 +6,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	iterable_errors "iterable-go/errors"
-	"iterable-go/types"
+	iterable_errors "github.com/block/iterable-go/errors"
+	"github.com/block/iterable-go/types"
 )
 
 const (

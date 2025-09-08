@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
-	"iterable-go/errors"
-	"iterable-go/logger"
+	"github.com/block/iterable-go/errors"
+	"github.com/block/iterable-go/logger"
 )
 
 const (
