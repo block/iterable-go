@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	iterable_go "iterable-go"
-	"iterable-go/types"
+	iterable_go "github.com/block/iterable-go"
+	"github.com/block/iterable-go/types"
 )
 
 func api_users_bulk_update(apiKey string) {

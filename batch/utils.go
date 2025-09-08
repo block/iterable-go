@@ -3,7 +3,7 @@ package batch
 import (
 	"errors"
 
-	iterable_errors "iterable-go/errors"
+	iterable_errors "github.com/block/iterable-go/errors"
 )
 
 const (

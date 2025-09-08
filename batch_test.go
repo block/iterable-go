@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"iterable-go/batch"
-	"iterable-go/logger"
-	"iterable-go/retry"
+	"github.com/block/iterable-go/batch"
+	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/retry"
 
 	"github.com/stretchr/testify/assert"
 )

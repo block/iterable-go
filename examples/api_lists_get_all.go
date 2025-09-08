@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	iterable_go "iterable-go"
+	iterable_go "github.com/block/iterable-go"
 )
 
 func api_lists_get_all(apiKey string) {

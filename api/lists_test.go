@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"iterable-go/errors"
-	"iterable-go/logger"
-	"iterable-go/types"
+	"github.com/block/iterable-go/errors"
+	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

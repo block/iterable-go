@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	iterable_go "iterable-go"
-	"iterable-go/batch"
-	"iterable-go/retry"
-	"iterable-go/types"
+	iterable_go "github.com/block/iterable-go"
+	"github.com/block/iterable-go/batch"
+	"github.com/block/iterable-go/retry"
+	"github.com/block/iterable-go/types"
 )
 
 func retry_custom(apiKey string) {
