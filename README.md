@@ -1,5 +1,7 @@
 # Iterable Go Client Library
 
+[![CI](https://github.com/block/iterable-go/actions/workflows/ci.yml/badge.svg)](https://github.com/block/iterable-go/actions/workflows/ci.yml)
+
 A Go (Golang) client library for integrating your applications with the [Iterable](https://www.iterable.com) API.
 
 This library follows the [Iterable API public documentation](https://api.iterable.com/api/docs) and provides both individual API calls and efficient batch processing capabilities.
