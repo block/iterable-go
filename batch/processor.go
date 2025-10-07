@@ -217,6 +217,7 @@ func (p *processor) process(batch []Message) {
 			}
 
 			failed = nil
+			p.logger.Debugf("Processor will individually retry for %d messages", len(retryOne))
 			for _, res := range retryOne {
 				if p.config.sendIndividual {
 					resOne := p.handler.ProcessOne(res.OriginalReq)

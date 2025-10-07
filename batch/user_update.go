@@ -83,6 +83,8 @@ func (s *userUpdateHandler) ProcessBatch(batch []Message) ([]Response, error, bo
 }
 
 func (s *userUpdateHandler) ProcessOne(req Message) Response {
+	s.logger.Debugf("UserRequest - ProccessOne request on retry")
+
 	var res Response
 	if subData, ok := req.Data.(*types.BulkUpdateUser); ok {
 		// Transform BulkUpdateUser to UserRequest
@@ -94,6 +96,10 @@ func (s *userUpdateHandler) ProcessOne(req Message) Response {
 			MergeNestedObjects: subData.MergeNestedObjects,
 			CreateNewFields:    s.CreateNewFields,
 		})
+		if err != nil {
+			s.logger.Debugf("Failed to process UserRequest: %v", err)
+		}
+
 		res = Response{
 			OriginalReq: req,
 			Error:       err,
@@ -106,6 +112,8 @@ func (s *userUpdateHandler) ProcessOne(req Message) Response {
 			Error:       InvalidDataErr,
 		}
 	}
+
+	s.logger.Debugf("Successfully sent UserRequest in ProcessOne")
 
 	return res
 }
