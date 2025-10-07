@@ -99,10 +99,9 @@ func shouldRetry(err error) bool {
 	if err != nil {
 		if apiErr, ok := err.(*iterable_errors.ApiError); ok {
 			status := apiErr.HttpStatusCode
-			if status == 0 || status == 429 || // Deadline exceeded or rate limited
-				(status > 200 && (status < 400 || status >= 500)) { // Non 4xx error
-				return true
-			}
+			return status == 0 || // Request was not sent or context timed out
+				status == 429 || // Deadline exceeded or rate limited
+				status >= 500 // Any server error
 		}
 	}
 	return false
