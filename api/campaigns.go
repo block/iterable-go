@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 )
 
@@ -25,9 +26,9 @@ type Campaigns struct {
 	api *apiClient
 }
 
-func NewCampaignsApi(apiKey string, httpClient *http.Client, logger logger.Logger) *Campaigns {
+func NewCampaignsApi(apiKey string, httpClient *http.Client, logger logger.Logger, limiter rate.Limiter) *Campaigns {
 	return &Campaigns{
-		api: newApiClient(apiKey, httpClient, logger),
+		api: newApiClient(apiKey, httpClient, logger, limiter),
 	}
 }
 

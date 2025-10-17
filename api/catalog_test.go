@@ -6,6 +6,7 @@ import (
 
 	"github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +14,7 @@ import (
 
 func TestNewCatalogApi(t *testing.T) {
 	client := &http.Client{}
-	api := NewCatalogApi(testApiKey, client, &logger.Noop{})
+	api := NewCatalogApi(testApiKey, client, &logger.Noop{}, &rate.NoopLimiter{})
 
 	assert.NotNil(t, api)
 	assert.NotNil(t, api.api)
@@ -92,7 +93,7 @@ func TestCatalog_All(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewCatalogApi(testApiKey, c, &logger.Noop{})
+			api := NewCatalogApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			catalogs, err := api.All()
 			if tt.expectErr {
@@ -196,7 +197,7 @@ func TestCatalog_FieldMapping(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewCatalogApi(testApiKey, c, &logger.Noop{})
+			api := NewCatalogApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			mapping, err := api.FieldMapping(tt.catalogName)
 			if tt.expectErr {

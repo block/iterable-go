@@ -7,6 +7,7 @@ import (
 
 	"github.com/block/iterable-go/api"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -280,7 +281,7 @@ func testListUnSubscribeHandler(failCnt int, rateLimitCnt int) (*listUnSubscribe
 	transport := NewFakeTransport(failCnt, rateLimitCnt)
 	httpClient := http.Client{}
 	httpClient.Transport = transport
-	lists := api.NewListsApi("test", &httpClient, &logger.Noop{})
+	lists := api.NewListsApi("test", &httpClient, &logger.Noop{}, &rate.NoopLimiter{})
 	handler := NewListUnSubscribeBatchHandler(lists, &logger.Noop{})
 	return handler.(*listUnSubscribeHandler), transport
 }

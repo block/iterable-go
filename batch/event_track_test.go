@@ -7,6 +7,7 @@ import (
 
 	"github.com/block/iterable-go/api"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -274,7 +275,7 @@ func generateEventTrackTestBatchMessages(cnt int) []Message {
 func testEventTrackHandler(failCnt int, rateLimitCnt int) *eventTrackHandler {
 	httpClient := http.Client{}
 	httpClient.Transport = NewFakeTransport(failCnt, rateLimitCnt)
-	ev := api.NewEventsApi("test", &httpClient, &logger.Noop{})
+	ev := api.NewEventsApi("test", &httpClient, &logger.Noop{}, &rate.NoopLimiter{})
 	handler := NewEventTrackHandler(ev, &logger.Noop{})
 	return handler.(*eventTrackHandler)
 }
@@ -285,7 +286,7 @@ func testEventTrackHandlerWithDisallowedEvents(disallowedEvents []string) *event
 
 	httpClient := http.Client{}
 	httpClient.Transport = transport
-	ev := api.NewEventsApi("test", &httpClient, &logger.Noop{})
+	ev := api.NewEventsApi("test", &httpClient, &logger.Noop{}, &rate.NoopLimiter{})
 	handler := NewEventTrackHandler(ev, &logger.Noop{})
 	return handler.(*eventTrackHandler)
 }

@@ -30,13 +30,13 @@ func NewClient(apiKey string, opts ...ConfigOption) *Client {
 
 	return &Client{
 		httpClient:   httpClient,
-		campaigns:    api.NewCampaignsApi(apiKey, httpClient, cfg.logger),
-		catalog:      api.NewCatalogApi(apiKey, httpClient, cfg.logger),
-		lists:        api.NewListsApi(apiKey, httpClient, cfg.logger),
-		channels:     api.NewChannelsApi(apiKey, httpClient, cfg.logger),
-		users:        api.NewUsersApi(apiKey, httpClient, cfg.logger),
-		events:       api.NewEventsApi(apiKey, httpClient, cfg.logger),
-		messageTypes: api.NewMessageTypesApi(apiKey, httpClient, cfg.logger),
+		campaigns:    api.NewCampaignsApi(apiKey, httpClient, cfg.logger, cfg.limiter),
+		catalog:      api.NewCatalogApi(apiKey, httpClient, cfg.logger, cfg.limiter),
+		lists:        api.NewListsApi(apiKey, httpClient, cfg.logger, cfg.limiter),
+		channels:     api.NewChannelsApi(apiKey, httpClient, cfg.logger, cfg.limiter),
+		users:        api.NewUsersApi(apiKey, httpClient, cfg.logger, cfg.limiter),
+		events:       api.NewEventsApi(apiKey, httpClient, cfg.logger, cfg.limiter),
+		messageTypes: api.NewMessageTypesApi(apiKey, httpClient, cfg.logger, cfg.limiter),
 	}
 }
 
