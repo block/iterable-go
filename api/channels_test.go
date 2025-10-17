@@ -6,6 +6,7 @@ import (
 
 	"github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +14,7 @@ import (
 
 func TestNewChannelsApi(t *testing.T) {
 	client := &http.Client{}
-	api := NewChannelsApi(testApiKey, client, &logger.Noop{})
+	api := NewChannelsApi(testApiKey, client, &logger.Noop{}, &rate.NoopLimiter{})
 
 	assert.NotNil(t, api)
 	assert.NotNil(t, api.api)
@@ -93,7 +94,7 @@ func TestChannels_Channels(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewChannelsApi(testApiKey, c, &logger.Noop{})
+			api := NewChannelsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			channels, err := api.Channels()
 			if tt.expectErr {

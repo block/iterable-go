@@ -8,6 +8,7 @@ import (
 
 	"github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 )
 
@@ -39,9 +40,9 @@ type Users struct {
 	api *apiClient
 }
 
-func NewUsersApi(apiKey string, httpClient *http.Client, logger logger.Logger) *Users {
+func NewUsersApi(apiKey string, httpClient *http.Client, logger logger.Logger, limiter rate.Limiter) *Users {
 	return &Users{
-		api: newApiClient(apiKey, httpClient, logger),
+		api: newApiClient(apiKey, httpClient, logger, limiter),
 	}
 }
 

@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -79,7 +82,7 @@ func Test_getJson(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := newApiClient(testApiKey, c, &logger.Noop{})
+			api := newApiClient(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			obj := types.User{}
 			err := api.getJson(tt.reqPath, &obj)
@@ -99,6 +102,63 @@ func Test_getJson(t *testing.T) {
 			assert.Equal(t, cl.isRead, cl.isClosed)
 		})
 	}
+}
+
+func TestApiClient_RateLimiting(t0 *testing.T) {
+	t0.Run("limited path", func(t *testing.T) {
+		limiter := newTestRateLimiter()
+		limiter.setLimitPath("/api/users")
+
+		c := httpClient([]byte(`{"userId":"1"}`), http.StatusOK, nil)
+		api := newApiClient(testApiKey, c, &logger.Noop{}, limiter)
+
+		start := time.Now()
+		user := map[string]any{}
+		err := api.getJson("users", &user)
+		elapsed := time.Since(start)
+
+		assert.Nil(t, err)
+		assert.Equal(t, int32(1), limiter.requestCount)
+		assert.Equal(t, int32(1), limiter.limitedCount)
+		assert.GreaterOrEqual(t, elapsed, limiter.delay)
+	})
+
+	t0.Run("not-limited path", func(t *testing.T) {
+		limiter := newTestRateLimiter()
+		limiter.setLimitPath("/api/users")
+
+		c := httpClient([]byte(`{"userId":"1"}`), http.StatusOK, nil)
+		api := newApiClient(testApiKey, c, &logger.Noop{}, limiter)
+
+		start := time.Now()
+		lists := map[string]any{}
+		err := api.getJson("lists", &lists)
+		elapsed := time.Since(start)
+
+		assert.Nil(t, err)
+		assert.Equal(t, int32(1), limiter.requestCount)
+		assert.Equal(t, int32(0), limiter.limitedCount)
+		assert.Less(t, elapsed, limiter.delay)
+	})
+
+	t0.Run("rate limiter with errors", func(t *testing.T) {
+		limiter := newTestRateLimiter()
+		limiter.setLimitPath("/api/users")
+
+		expectedErr := fmt.Errorf("test error")
+		c := httpClient(nil, http.StatusInternalServerError, expectedErr)
+		api := newApiClient(testApiKey, c, &logger.Noop{}, limiter)
+
+		start := time.Now()
+		user := map[string]any{}
+		err := api.getJson("users", &user)
+		elapsed := time.Since(start)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, int32(1), limiter.requestCount)
+		assert.Equal(t, int32(1), limiter.limitedCount)
+		assert.GreaterOrEqual(t, elapsed, limiter.delay)
+	})
 }
 
 func Test_toNilErr(t *testing.T) {
@@ -163,4 +223,40 @@ func (c *testReader) Close() error {
 func (c *testReader) Read(p []byte) (n int, err error) {
 	c.isRead = true
 	return c.Reader.Read(p)
+}
+
+// testRateLimiter implements rate.Limiter interface for testing
+type testRateLimiter struct {
+	mu           sync.Mutex
+	delay        time.Duration
+	requestCount int32
+	limitedCount int32
+	limitByPaths map[string]bool
+}
+
+func newTestRateLimiter() *testRateLimiter {
+	return &testRateLimiter{
+		delay:        100 * time.Millisecond,
+		limitByPaths: make(map[string]bool),
+	}
+}
+
+func (l *testRateLimiter) Limit(req *http.Request) {
+	l.mu.Lock()
+	l.requestCount++
+	shouldLimit := l.limitByPaths[req.URL.Path]
+	if shouldLimit {
+		l.limitedCount++
+	}
+	l.mu.Unlock()
+
+	if shouldLimit {
+		time.Sleep(l.delay)
+	}
+}
+
+func (l *testRateLimiter) setLimitPath(path string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.limitByPaths[path] = true
 }

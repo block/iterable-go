@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/block/iterable-go/rate"
 	"github.com/stretchr/testify/require"
 
 	"github.com/block/iterable-go/errors"
@@ -17,7 +18,7 @@ import (
 
 func TestNewCampaignsApi(t *testing.T) {
 	client := &http.Client{}
-	api := NewCampaignsApi(testApiKey, client, &logger.Noop{})
+	api := NewCampaignsApi(testApiKey, client, &logger.Noop{}, &rate.NoopLimiter{})
 
 	assert.NotNil(t, api)
 	assert.NotNil(t, api.api)
@@ -89,7 +90,7 @@ func TestCampaigns_All(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewCampaignsApi(testApiKey, c, &logger.Noop{})
+			api := NewCampaignsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			campaigns, err := api.All()
 			if tt.expectErr {
@@ -161,7 +162,7 @@ func TestCampaigns_Trigger(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewCampaignsApi(testApiKey, c, &logger.Noop{})
+			api := NewCampaignsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.Trigger(tt.request)
 			if tt.expectErr {
@@ -240,7 +241,7 @@ func TestCampaigns_ActivateTriggered(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewCampaignsApi(testApiKey, c, &logger.Noop{})
+			api := NewCampaignsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.ActivateTriggered(tt.request.CampaignId)
 			if tt.expectErr {
@@ -327,7 +328,7 @@ func TestCampaigns_Create(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewCampaignsApi(testApiKey, c, &logger.Noop{})
+			api := NewCampaignsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			camId, err := api.Create(tt.request)
 			if tt.expectErr {
@@ -407,7 +408,7 @@ func TestCampaigns_Abort(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewCampaignsApi(testApiKey, c, &logger.Noop{})
+			api := NewCampaignsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.Abort(tt.request.CampaignId)
 			if tt.expectErr {
@@ -486,7 +487,7 @@ func TestCampaigns_Cancel(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewCampaignsApi(testApiKey, c, &logger.Noop{})
+			api := NewCampaignsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.Cancel(tt.request.CampaignId)
 			if tt.expectErr {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 )
 
@@ -24,9 +25,9 @@ type Lists struct {
 	api *apiClient
 }
 
-func NewListsApi(apiKey string, httpClient *http.Client, logger logger.Logger) *Lists {
+func NewListsApi(apiKey string, httpClient *http.Client, logger logger.Logger, limiter rate.Limiter) *Lists {
 	return &Lists{
-		api: newApiClient(apiKey, httpClient, logger),
+		api: newApiClient(apiKey, httpClient, logger, limiter),
 	}
 }
 

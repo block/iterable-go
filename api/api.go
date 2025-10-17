@@ -9,6 +9,7 @@ import (
 
 	"github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 )
 
 const (
@@ -19,17 +20,20 @@ type apiClient struct {
 	apiKey     string
 	httpClient *http.Client
 	logger     logger.Logger
+	limiter    rate.Limiter
 }
 
 func newApiClient(
 	apiKey string,
 	httpClient *http.Client,
 	logger logger.Logger,
+	limiter rate.Limiter,
 ) *apiClient {
 	return &apiClient{
 		apiKey:     apiKey,
 		httpClient: httpClient,
 		logger:     logger,
+		limiter:    limiter,
 	}
 }
 
@@ -146,6 +150,8 @@ func (c *apiClient) send(
 	req.Header.Add("Content-Type", contentType)
 	req.Header.Add("Api-Key", c.apiKey)
 	req.Header.Set("Accept", accept)
+
+	c.limiter.Limit(req)
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {

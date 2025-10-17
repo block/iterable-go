@@ -7,6 +7,7 @@ import (
 
 	"github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -15,7 +16,7 @@ import (
 
 func TestNewUsersApi(t *testing.T) {
 	client := &http.Client{}
-	api := NewUsersApi(testApiKey, client, &logger.Noop{})
+	api := NewUsersApi(testApiKey, client, &logger.Noop{}, &rate.NoopLimiter{})
 
 	assert.NotNil(t, api)
 	assert.NotNil(t, api.api)
@@ -113,7 +114,7 @@ func TestUsers_UpdateOrCreate(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, &logger.Noop{})
+			api := NewUsersApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.UpdateOrCreate(tt.request)
 			if tt.expectErr {
@@ -240,7 +241,7 @@ func TestUsers_BulkUpdate(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, &logger.Noop{})
+			api := NewUsersApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.BulkUpdate(tt.request)
 			if tt.expectErr {
@@ -343,7 +344,7 @@ func TestUsers_GetByEmail(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, &logger.Noop{})
+			api := NewUsersApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			user, found, err := api.GetByEmail(tt.email)
 			if tt.expectErr {
@@ -461,7 +462,7 @@ func TestUsers_GetById(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, &logger.Noop{})
+			api := NewUsersApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			user, found, err := api.GetById(tt.userId)
 			if tt.expectErr {
@@ -551,7 +552,7 @@ func TestUsers_DeleteByEmail(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, &logger.Noop{})
+			api := NewUsersApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.DeleteByEmail(tt.email)
 			if tt.expectErr {
@@ -666,7 +667,7 @@ func TestUsers_GetSentMessages(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, &logger.Noop{})
+			api := NewUsersApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			messages, err := api.GetSentMessages(tt.request)
 			if tt.expectErr {
@@ -753,7 +754,7 @@ func TestUsers_GetAllFields(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, nil)
+			api := NewUsersApi(testApiKey, c, nil, &rate.NoopLimiter{})
 
 			fields, err := api.GetAllFields()
 			if tt.expectErr {
@@ -848,7 +849,7 @@ func TestUsers_ForgetAndUnforget(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, nil)
+			api := NewUsersApi(testApiKey, c, nil, &rate.NoopLimiter{})
 
 			var res *types.PostResponse
 			var err error
@@ -961,7 +962,7 @@ func TestUsers_UpdateEmail(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewUsersApi(testApiKey, c, nil)
+			api := NewUsersApi(testApiKey, c, nil, &rate.NoopLimiter{})
 
 			res, err := api.UpdateEmail(tt.email, tt.userId, tt.newEmail)
 			if tt.expectErr {

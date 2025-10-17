@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/block/iterable-go/rate"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,6 +28,7 @@ func Test_newClient_opts(t *testing.T) {
 		apiKey,
 		WithTimeout(1*time.Second),
 		WithTransport(tt),
+		WithRateLimiter(&rate.NoopLimiter{}),
 	)
 	assert.Equal(t, 1*time.Second, c.httpClient.Timeout)
 	assert.Equal(t, tt, c.httpClient.Transport)
@@ -55,6 +57,12 @@ func Test_config_WithTimeout(t *testing.T) {
 	c := config{}
 	WithTimeout(2 * time.Second)(&c)
 	assert.Equal(t, 2*time.Second, c.timeout)
+}
+
+func Test_config_WithRateLimiter(t *testing.T) {
+	c := config{}
+	WithRateLimiter(&rate.NoopLimiter{})(&c)
+	assert.NotNil(t, c.limiter)
 }
 
 type fakeTransport struct {

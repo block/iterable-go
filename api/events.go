@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 )
 
@@ -25,9 +26,9 @@ type Events struct {
 	api *apiClient
 }
 
-func NewEventsApi(apiKey string, httpClient *http.Client, logger logger.Logger) *Events {
+func NewEventsApi(apiKey string, httpClient *http.Client, logger logger.Logger, limiter rate.Limiter) *Events {
 	return &Events{
-		api: newApiClient(apiKey, httpClient, logger),
+		api: newApiClient(apiKey, httpClient, logger, limiter),
 	}
 }
 

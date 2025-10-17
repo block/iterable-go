@@ -8,6 +8,7 @@ import (
 
 	"github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,7 @@ import (
 
 func TestNewEventsApi(t *testing.T) {
 	client := &http.Client{}
-	api := NewEventsApi(testApiKey, client, &logger.Noop{})
+	api := NewEventsApi(testApiKey, client, &logger.Noop{}, &rate.NoopLimiter{})
 
 	assert.NotNil(t, api)
 	assert.NotNil(t, api.api)
@@ -105,7 +106,7 @@ func TestEvents_Track(t *testing.T) {
 			}
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewEventsApi(testApiKey, c, &logger.Noop{})
+			api := NewEventsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.Track(tt.request)
 			if tt.expectErr {
@@ -236,7 +237,7 @@ func TestEvents_TrackBulk(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewEventsApi(testApiKey, c, &logger.Noop{})
+			api := NewEventsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.TrackBulk(tt.request)
 			if tt.expectErr {
@@ -341,7 +342,7 @@ func TestEvents_GetByEmail(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewEventsApi(testApiKey, c, &logger.Noop{})
+			api := NewEventsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			events, err := api.GetByEmail(tt.email)
 			if tt.expectErr {
@@ -448,7 +449,7 @@ func TestEvents_GetByUserId(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewEventsApi(testApiKey, c, &logger.Noop{})
+			api := NewEventsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			events, err := api.GetByUserId(tt.userId)
 			if tt.expectErr {

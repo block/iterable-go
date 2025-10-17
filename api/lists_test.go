@@ -7,6 +7,7 @@ import (
 
 	"github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -15,7 +16,7 @@ import (
 
 func TestNewListsApi(t *testing.T) {
 	client := &http.Client{}
-	api := NewListsApi(testApiKey, client, &logger.Noop{})
+	api := NewListsApi(testApiKey, client, &logger.Noop{}, &rate.NoopLimiter{})
 
 	assert.NotNil(t, api)
 	assert.NotNil(t, api.api)
@@ -95,7 +96,7 @@ func TestLists_All(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewListsApi(testApiKey, c, &logger.Noop{})
+			api := NewListsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			lists, err := api.All()
 			if tt.expectErr {
@@ -179,7 +180,7 @@ func TestLists_Delete(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewListsApi(testApiKey, c, &logger.Noop{})
+			api := NewListsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.Delete(tt.listId)
 			if tt.expectErr {
@@ -259,7 +260,7 @@ func TestLists_Create(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewListsApi(testApiKey, c, &logger.Noop{})
+			api := NewListsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			listId, err := api.Create(tt.listName, tt.description)
 			if tt.expectErr {
@@ -391,7 +392,7 @@ func TestLists_Subscribe(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewListsApi(testApiKey, c, &logger.Noop{})
+			api := NewListsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.Subscribe(tt.request)
 			if tt.expectErr {
@@ -517,7 +518,7 @@ func TestLists_UnSubscribe(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewListsApi(testApiKey, c, &logger.Noop{})
+			api := NewListsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			res, err := api.UnSubscribe(tt.request)
 			if tt.expectErr {
@@ -608,7 +609,7 @@ func TestLists_Users(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewListsApi(testApiKey, c, &logger.Noop{})
+			api := NewListsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			users, err := api.Users(tt.listId)
 			if tt.expectErr {
@@ -691,7 +692,7 @@ func TestLists_Size(t *testing.T) {
 			t.Parallel()
 
 			c := httpClient(tt.resBody, tt.resCode, tt.resErr)
-			api := NewListsApi(testApiKey, c, &logger.Noop{})
+			api := NewListsApi(testApiKey, c, &logger.Noop{}, &rate.NoopLimiter{})
 
 			size, err := api.Size(tt.listId)
 			if tt.expectErr {

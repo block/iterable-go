@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 )
 
 type config struct {
@@ -24,6 +25,11 @@ type config struct {
 	// iterable-go client operations
 	// default: logger.Noop
 	logger logger.Logger
+
+	// limiter provides a way to control how many requests are
+	// sent to Iterable API
+	// default: rate.NoopLimiter
+	limiter rate.Limiter
 }
 
 func defaultConfig() *config {
@@ -31,6 +37,7 @@ func defaultConfig() *config {
 		transport: http.DefaultTransport,
 		timeout:   10 * time.Second,
 		logger:    logger.Noop{},
+		limiter:   rate.NoopLimiter{},
 	}
 }
 
@@ -51,5 +58,11 @@ func WithTimeout(timeout time.Duration) ConfigOption {
 func WithLogger(logger logger.Logger) ConfigOption {
 	return func(c *config) {
 		c.logger = logger
+	}
+}
+
+func WithRateLimiter(limiter rate.Limiter) ConfigOption {
+	return func(c *config) {
+		c.limiter = limiter
 	}
 }

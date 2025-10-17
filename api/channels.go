@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 )
 
@@ -17,9 +18,9 @@ type Channels struct {
 	api *apiClient
 }
 
-func NewChannelsApi(apiKey string, httpClient *http.Client, logger logger.Logger) *Channels {
+func NewChannelsApi(apiKey string, httpClient *http.Client, logger logger.Logger, limiter rate.Limiter) *Channels {
 	return &Channels{
-		api: newApiClient(apiKey, httpClient, logger),
+		api: newApiClient(apiKey, httpClient, logger, limiter),
 	}
 }
 

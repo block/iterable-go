@@ -7,6 +7,7 @@ import (
 
 	"github.com/block/iterable-go/api"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
 
 	"github.com/stretchr/testify/assert"
@@ -186,7 +187,7 @@ func testSubscriptionUpdateHandler(failCnt int, rateLimitCnt int) *subscriptionU
 	transport := NewFakeTransport(failCnt, rateLimitCnt)
 	httpClient := http.Client{}
 	httpClient.Transport = transport
-	lists := api.NewUsersApi("test", &httpClient, &logger.Noop{})
+	lists := api.NewUsersApi("test", &httpClient, &logger.Noop{}, &rate.NoopLimiter{})
 	handler := NewSubscriptionUpdateHandler(lists, &logger.Noop{})
 	return handler.(*subscriptionUpdateHandler)
 }
