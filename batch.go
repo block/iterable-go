@@ -22,14 +22,15 @@ func NewBatch(client *Client, opts ...BatchConfigOption) *Batch {
 	}
 
 	pConfig := batch.ProcessorConfig{
-		FlushQueueSize: bConfig.flushQueueSize,
-		FlushInterval:  bConfig.flushInterval,
-		MaxRetries:     bConfig.retryTimes,
-		Retry:          bConfig.retry,
-		SendIndividual: func() bool { return bConfig.sendIndividual },
-		MaxBufferSize:  bConfig.bufferSize,
-		Async:          func() bool { return bConfig.sendAsync },
-		Logger:         bConfig.logger,
+		FlushQueueSize:            bConfig.flushQueueSize,
+		FlushInterval:             bConfig.flushInterval,
+		MaxRetries:                bConfig.retryTimes,
+		Retry:                     bConfig.retry,
+		SendIndividual:            func() bool { return bConfig.sendIndividual },
+		NumOfIndividualGoroutines: bConfig.numOfIndividualGoroutines,
+		MaxBufferSize:             bConfig.bufferSize,
+		Async:                     func() bool { return bConfig.sendAsync },
+		Logger:                    bConfig.logger,
 	}
 
 	return &Batch{

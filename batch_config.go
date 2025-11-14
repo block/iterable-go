@@ -53,6 +53,14 @@ type batchConfig struct {
 	// default: true
 	sendIndividual bool
 
+	// numOfIndividualGoroutines controls the number of concurrent goroutines used
+	// when sending individual messages after a partial batch failure.
+	// This is only used when sendIndividual is true and a batch request partially fails.
+	// Higher values increase parallelism but also increase resource usage.
+	// The value must be between [1, 100]
+	// default: 1 (uses a single goroutine)
+	numOfIndividualGoroutines int
+
 	// logger provides logging functionality for debugging
 	// and monitoring batch processing operations
 	// (maps to ProcessorConfig.Logger)
@@ -70,15 +78,16 @@ type batchConfig struct {
 
 func defaultBatchConfig() batchConfig {
 	return batchConfig{
-		flushQueueSize: 100,
-		flushInterval:  5 * time.Second,
-		bufferSize:     500,
-		retryTimes:     1,
-		retry:          retry.NewExponentialRetry(),
-		sendAsync:      true,
-		sendIndividual: true,
-		logger:         logger.Noop{},
-		responseChan:   nil,
+		flushQueueSize:            100,
+		flushInterval:             5 * time.Second,
+		bufferSize:                500,
+		retryTimes:                1,
+		retry:                     retry.NewExponentialRetry(),
+		sendAsync:                 true,
+		sendIndividual:            true,
+		numOfIndividualGoroutines: 1,
+		logger:                    logger.Noop{},
+		responseChan:              nil,
 	}
 }
 
@@ -123,6 +132,12 @@ func WithBatchSendAsync(sendAsync bool) BatchConfigOption {
 func WithBatchSendIndividual(sendIndividual bool) BatchConfigOption {
 	return func(c *batchConfig) {
 		c.sendIndividual = sendIndividual
+	}
+}
+
+func WithBatchNumOfIndividualGoroutines(numOfGoroutines int) BatchConfigOption {
+	return func(c *batchConfig) {
+		c.numOfIndividualGoroutines = numOfGoroutines
 	}
 }
 

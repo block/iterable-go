@@ -41,6 +41,14 @@ type ProcessorConfig struct {
 	// default: true
 	SendIndividual BoolFunc
 
+	// NumOfIndividualGoroutines specifies the number of concurrent goroutines used
+	// when retrying failed messages individually after a partial batch failure.
+	// Only applies when SendIndividual is true and some messages in a batch fail.
+	// Values must be between 1 and 100.
+	// Higher values increase parallelism but also resource usage.
+	// default: 1 (processes retries sequentially)
+	NumOfIndividualGoroutines int
+
 	// MaxBufferSize determines the buffer size of the internal request channel
 	// to prevent blocking on Add() calls
 	// default: 2000
@@ -81,11 +89,12 @@ func defaultProcessorConfig() ProcessorConfig {
 			retry.WithInitialDuration(100*time.Millisecond),
 			retry.WithLogger(&logger.Noop{}),
 		),
-		sendIndividual:   true,
-		MaxBufferSize:    2000,
-		async:            true,
-		MaxAsyncRequests: 50,
-		Logger:           &logger.Noop{},
+		sendIndividual:            true,
+		NumOfIndividualGoroutines: 1,
+		MaxBufferSize:             2000,
+		async:                     true,
+		MaxAsyncRequests:          50,
+		Logger:                    &logger.Noop{},
 	}
 }
 
@@ -105,6 +114,11 @@ func applyProcessorConfig(inConfig ProcessorConfig) ProcessorConfig {
 	}
 	if inConfig.SendIndividual != nil {
 		outConfig.sendIndividual = inConfig.SendIndividual()
+	}
+	if inConfig.NumOfIndividualGoroutines < 1 || inConfig.NumOfIndividualGoroutines > 100 {
+		outConfig.NumOfIndividualGoroutines = 1
+	} else {
+		outConfig.NumOfIndividualGoroutines = inConfig.NumOfIndividualGoroutines
 	}
 	if inConfig.MaxBufferSize > 0 {
 		outConfig.MaxBufferSize = inConfig.MaxBufferSize
