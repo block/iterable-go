@@ -218,13 +218,26 @@ func (p *processor) process(batch []Message) {
 
 			failed = nil
 			p.logger.Debugf("Processor will individually retry for %d messages", len(retryOne))
+
+			g := errgroup.Group{}
+			g.SetLimit(p.config.NumOfIndividualGoroutines)
 			for _, res := range retryOne {
 				if p.config.sendIndividual {
-					resOne := p.handler.ProcessOne(res.OriginalReq)
-					p.sendResponse(resOne)
+					g.Go(func() error {
+						resOne := p.handler.ProcessOne(res.OriginalReq)
+						p.sendResponse(resOne)
+						return nil
+					})
 				} else {
 					p.sendResponse(res)
 				}
+			}
+			waitErr := g.Wait()
+			if waitErr != nil {
+				p.logger.Errorf(
+					"Processor failed to wait for an errgroup (to send messages individually): %v",
+					waitErr,
+				)
 			}
 			return nil, retry.StopNow
 		},

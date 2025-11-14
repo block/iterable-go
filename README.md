@@ -99,17 +99,18 @@ client := iterable_go.NewClient(
 
 The `NewBatch` function provides extensive configuration for batch processing behavior:
 
-| Option                      | Type                    | Default            | Description                                      | Example                                              |
-|-----------------------------|-------------------------|--------------------|--------------------------------------------------|------------------------------------------------------|
-| `WithBatchFlushQueueSize`   | `int`                   | `100`              | Maximum messages before triggering batch         | `iterable_go.WithBatchFlushQueueSize(50)`            |
-| `WithBatchFlushInterval`    | `time.Duration`         | `5 * time.Second`  | Maximum time before triggering batch             | `iterable_go.WithBatchFlushInterval(10*time.Second)` |
-| `WithBatchBufferSize`       | `int`                   | `500`              | Internal channel buffer size                     | `iterable_go.WithBatchBufferSize(1000)`              |
-| `WithBatchRetryTimes`       | `int`                   | `1`                | Maximum retry attempts                           | `iterable_go.WithBatchRetryTimes(3)`                 |
-| `WithBatchSendIndividual`   | `bool`                  | `true`             | Send messages individually after a batch failure | `iterable_go.WithBatchSendIndividual(false)`         |
-| `WithBatchRetry`            | `retry.Retry`           | `ExponentialRetry` | Custom retry strategy                            | `iterable_go.WithBatchRetry(myRetry)`                |
-| `WithBatchSendAsync`        | `bool`                  | `true`             | Enable asynchronous processing                   | `iterable_go.WithBatchSendAsync(false)`              |
-| `WithBatchLogger`           | `logger.Logger`         | `logger.Noop{}`    | Custom logger for batch operations               | `iterable_go.WithBatchLogger(myLogger)`              |
-| `WithBatchResponseListener` | `chan<- batch.Response` | `nil`              | Channel for response monitoring                  | `iterable_go.WithBatchResponseListener(respChan)`    |
+| Option                               | Type                    | Default            | Description                                           | Example                                              |
+|--------------------------------------|-------------------------|--------------------|-------------------------------------------------------|------------------------------------------------------|
+| `WithBatchFlushQueueSize`            | `int`                   | `100`              | Maximum messages before triggering batch              | `iterable_go.WithBatchFlushQueueSize(50)`            |
+| `WithBatchFlushInterval`             | `time.Duration`         | `5 * time.Second`  | Maximum time before triggering batch                  | `iterable_go.WithBatchFlushInterval(10*time.Second)` |
+| `WithBatchBufferSize`                | `int`                   | `500`              | Internal channel buffer size                          | `iterable_go.WithBatchBufferSize(1000)`              |
+| `WithBatchRetryTimes`                | `int`                   | `1`                | Maximum retry attempts                                | `iterable_go.WithBatchRetryTimes(3)`                 |
+| `WithBatchSendIndividual`            | `bool`                  | `true`             | Send messages individually after a batch failure      | `iterable_go.WithBatchSendIndividual(false)`         |
+| `WithBatchNumOfIndividualGoroutines` | `int`                   | `1`                | How manu goroutines to use to send individual retries | `iterable_go.WithBatchNumOfIndividualGoroutines(10)` |
+| `WithBatchRetry`                     | `retry.Retry`           | `ExponentialRetry` | Custom retry strategy                                 | `iterable_go.WithBatchRetry(myRetry)`                |
+| `WithBatchSendAsync`                 | `bool`                  | `true`             | Enable asynchronous processing                        | `iterable_go.WithBatchSendAsync(false)`              |
+| `WithBatchLogger`                    | `logger.Logger`         | `logger.Noop{}`    | Custom logger for batch operations                    | `iterable_go.WithBatchLogger(myLogger)`              |
+| `WithBatchResponseListener`          | `chan<- batch.Response` | `nil`              | Channel for response monitoring                       | `iterable_go.WithBatchResponseListener(respChan)`    |
 
 **Example:**
 ```go
