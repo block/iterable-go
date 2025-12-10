@@ -6,8 +6,18 @@ type PostResponse struct {
 	Params  map[string]interface{} `json:"params"`
 }
 
-func (p *PostResponse) isSuccess() bool {
-	return p.Code == "Success"
+type MismatchedFieldsParams struct {
+	ValidationErrors MismatchedFieldsErrors `json:"validationErrors"`
+}
+
+type MismatchedFieldsErrors = map[string]MismatchedFieldError
+
+type MismatchedFieldError struct {
+	IncomingTypes  []string `json:"incomingTypes"`
+	ExpectedType   string   `json:"expectedType"`
+	Category       string   `json:"category"`
+	OffendingValue string   `json:"offendingValue"`
+	Type           string   `json:"_type"`
 }
 
 type FailedUpdates struct {
