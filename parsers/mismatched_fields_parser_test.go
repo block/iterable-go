@@ -211,3 +211,40 @@ func TestMismatchedFieldsParamsFromBytes(t *testing.T) {
 		})
 	}
 }
+
+func Test_MismatchedFields_With_FieldTypes_Usage_Example(t *testing.T) {
+	data := []byte(`{
+		"validationErrors": {
+			"my_project_etl:::soc_signup_at": {
+				"incomingTypes": ["string", "keyword"],
+				"expectedType": "date",
+				"category": "user",
+				"offendingValue": "2020-04-13 14:04:09.000",
+				"_type": "UnexpectedType"
+			}
+		}
+	}`)
+
+	mismatchedFieldsCache := map[string]types.FieldType{}
+	params, ok := MismatchedFieldsParamsFromBytes(data)
+	assert.True(t, ok)
+
+	for fieldName, field := range params.ValidationErrors {
+		fieldType := types.FieldTypes.Parse(field.ExpectedType)
+		if types.FieldTypes.IsKnown(fieldType) {
+			mismatchedFieldsCache[fieldName] = fieldType
+		}
+	}
+
+	// Usage
+	incomingMessage := map[string]any{
+		"my_project_etl:::soc_signup_at": "2020-04-13 14:04:09.000",
+	}
+	fieldName := "my_project_etl:::soc_signup_at"
+	incomingField := incomingMessage[fieldName]
+	cachedFieldType := mismatchedFieldsCache[fieldName]
+
+	isOk := types.FieldTypes.Is(fieldName, incomingField, cachedFieldType)
+	// required Date, but was String
+	assert.False(t, isOk)
+}
