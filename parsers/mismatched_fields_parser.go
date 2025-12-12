@@ -6,6 +6,17 @@ import (
 	"github.com/block/iterable-go/types"
 )
 
+func MismatchedFieldsParamsFromResponseBody(body []byte) (types.MismatchedFieldsParams, bool) {
+	var res types.PostResponse
+	err := json.Unmarshal(body, &res)
+	if err != nil {
+		var empty types.MismatchedFieldsParams
+		return empty, false
+	}
+
+	return MismatchedFieldsParamsFromResponse(res)
+}
+
 func MismatchedFieldsParamsFromResponse(res types.PostResponse) (types.MismatchedFieldsParams, bool) {
 	return MismatchedFieldsParamsFromParams(res.Params)
 }

@@ -212,6 +212,90 @@ func TestMismatchedFieldsParamsFromBytes(t *testing.T) {
 	}
 }
 
+func TestMismatchedFieldsParamsFromResponseBody(t *testing.T) {
+	tests := []struct {
+		name   string
+		data   []byte
+		want   types.MismatchedFieldsParams
+		wantOk bool
+	}{
+		{
+			name: "valid json",
+			data: []byte(`{
+				"msg": "",
+				"code": "",
+				"params": {
+					"validationErrors": {
+						"my_project_etl:::soc_signup_at": {
+							"incomingTypes": ["string", "keyword"],
+							"expectedType": "date",
+							"category": "user",
+							"offendingValue": "2020-04-13 14:04:09.000",
+							"_type": "UnexpectedType"
+						}
+					}
+				}
+			}`),
+			want: types.MismatchedFieldsParams{
+				ValidationErrors: types.MismatchedFieldsErrors{
+					"my_project_etl:::soc_signup_at": {
+						IncomingTypes:  []string{"string", "keyword"},
+						ExpectedType:   "date",
+						Category:       "user",
+						OffendingValue: "2020-04-13 14:04:09.000",
+						Type:           "UnexpectedType",
+					},
+				},
+			},
+			wantOk: true,
+		},
+		{
+			name: "valid json but no validation errors",
+			data: []byte(`{
+				"msg": "",
+				"code": "",
+				"params": {
+					"something else": 10
+				}
+			}`),
+			want:   types.MismatchedFieldsParams{},
+			wantOk: true,
+		},
+		{
+			name:   "empty json object",
+			data:   []byte(`{}`),
+			want:   types.MismatchedFieldsParams{},
+			wantOk: true,
+		},
+		{
+			name:   "invalid json",
+			data:   []byte(`{"invalid json"`),
+			want:   types.MismatchedFieldsParams{},
+			wantOk: false,
+		},
+		{
+			name:   "null json",
+			data:   []byte(`null`),
+			want:   types.MismatchedFieldsParams{},
+			wantOk: true,
+		},
+		{
+			name:   "nil data",
+			data:   nil,
+			want:   types.MismatchedFieldsParams{},
+			wantOk: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := MismatchedFieldsParamsFromResponseBody(tt.data)
+			assert.Equal(t, tt.wantOk, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func Test_MismatchedFields_With_FieldTypes_Usage_Example(t *testing.T) {
 	data := []byte(`{
 		"validationErrors": {
