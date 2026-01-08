@@ -1,6 +1,8 @@
 package batch
 
 import (
+	"net/http"
+
 	"github.com/block/iterable-go/api"
 	iterable_errors "github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
@@ -54,10 +56,26 @@ func (s *userUpdateHandler) ProcessBatch(batch []Message) ([]Response, error, bo
 	s.logger.Debugf("BulkUpdateRequest response: %+v, err: %+v", res, err)
 	// Check for failures and add to responses
 	if err != nil {
+		apiErr := err.(*iterable_errors.ApiError)
+		if apiErr == nil {
+			return nil, err, shouldRetry(err)
+		}
 		// If there is a validation error, send all messages individually
-		if apiErr := err.(*iterable_errors.ApiError); apiErr != nil && apiErr.IterableCode == FieldTypeMismatchErr {
+		if apiErr.IterableCode == FieldTypeMismatchErr {
 			responses = addReqFailuresToResponses(batchReq.reqByEmailMap, responses, FieldTypeMismatchErr, true)
 			responses = addReqFailuresToResponses(batchReq.reqByUserIdMap, responses, FieldTypeMismatchErr, true)
+			return responses, nil, true
+		}
+		if apiErr.HttpStatusCode == http.StatusRequestTimeout {
+			errText := http.StatusText(http.StatusRequestTimeout)
+			responses = addReqFailuresToResponses(batchReq.reqByEmailMap, responses, errText, true)
+			responses = addReqFailuresToResponses(batchReq.reqByUserIdMap, responses, errText, true)
+			return responses, nil, true
+		}
+		if apiErr.HttpStatusCode == http.StatusRequestEntityTooLarge {
+			errText := http.StatusText(http.StatusRequestEntityTooLarge)
+			responses = addReqFailuresToResponses(batchReq.reqByEmailMap, responses, errText, true)
+			responses = addReqFailuresToResponses(batchReq.reqByUserIdMap, responses, errText, true)
 			return responses, nil, true
 		}
 		return nil, err, shouldRetry(err)
