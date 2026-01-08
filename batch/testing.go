@@ -3,7 +3,7 @@ package batch
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	iterable_errors "github.com/block/iterable-go/errors"
@@ -87,12 +87,14 @@ func (h *TestBatchHandler) ProcessOne(message Message) Response {
 }
 
 type fakeTransport struct {
-	setBatchFailCnt      int
-	batchFailCnt         int
-	setBatchRateLimitCnt int
-	batchRateLimitCnt    int
-	reqCnt               int
-	disallowedEventNames []string
+	setBatchFailCnt            int
+	setBatchRateLimitCnt       int
+	setBatchContentTooLargeCnt int
+	batchFailCnt               int
+	batchRateLimitCnt          int
+	batchContentTooLargeCnt    int
+	reqCnt                     int
+	disallowedEventNames       []string
 }
 
 func NewFakeTransport(failCnt int, rateLimitCnt int) *fakeTransport {
@@ -100,6 +102,10 @@ func NewFakeTransport(failCnt int, rateLimitCnt int) *fakeTransport {
 		setBatchFailCnt:      failCnt,
 		setBatchRateLimitCnt: rateLimitCnt,
 	}
+}
+
+func (m *fakeTransport) SetContentTooLargeCount(c int) {
+	m.setBatchContentTooLargeCnt = c
 }
 
 func (m *fakeTransport) SetDisallowedEventNames(eventNames []string) {
@@ -117,7 +123,7 @@ func (m *fakeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		resBytes, _ := json.Marshal(res)
 		return &http.Response{
 			StatusCode: 500,
-			Body:       ioutil.NopCloser(bytes.NewReader(resBytes)),
+			Body:       io.NopCloser(bytes.NewReader(resBytes)),
 		}, nil
 	}
 	if m.batchRateLimitCnt < m.setBatchRateLimitCnt {
@@ -129,7 +135,19 @@ func (m *fakeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		resBytes, _ := json.Marshal(res)
 		return &http.Response{
 			StatusCode: 429,
-			Body:       ioutil.NopCloser(bytes.NewReader(resBytes)),
+			Body:       io.NopCloser(bytes.NewReader(resBytes)),
+		}, nil
+	}
+	if m.batchContentTooLargeCnt < m.setBatchContentTooLargeCnt {
+		m.batchContentTooLargeCnt++
+		res := types.PostResponse{
+			Message: "fail",
+			Code:    "413",
+		}
+		resBytes, _ := json.Marshal(res)
+		return &http.Response{
+			StatusCode: 413,
+			Body:       io.NopCloser(bytes.NewReader(resBytes)),
 		}, nil
 	}
 
@@ -182,6 +200,6 @@ func (m *fakeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resBytes, _ := json.Marshal(res)
 	return &http.Response{
 		StatusCode: 200,
-		Body:       ioutil.NopCloser(bytes.NewReader(resBytes)),
+		Body:       io.NopCloser(bytes.NewReader(resBytes)),
 	}, nil
 }
