@@ -6,6 +6,7 @@ import (
 	"github.com/block/iterable-go/api"
 	iterable_errors "github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/parsers"
 	"github.com/block/iterable-go/types"
 )
 
@@ -74,7 +75,8 @@ func (s *userUpdateHandler) ProcessBatch(batch []Message) (ProcessBatchResponse,
 
 		// If there is a validation error, send all messages individually
 		if apiErr.IterableCode == iterable_errors.ITERABLE_FieldTypeMismatchErrStr {
-			err2 := errors.Join(ErrFieldTypeMismatch, err)
+			fields, _ := parsers.MismatchedFieldsParamsFromResponseBody(apiErr.Body)
+			err2 := errors.Join(newErrFieldTypeMismatch(fields), err)
 			result = append(result, toFailures(messages, err2, true)...)
 
 			return StatusRetryIndividual{result}, nil

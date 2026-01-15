@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	iterable_errors "github.com/block/iterable-go/errors"
+	"github.com/block/iterable-go/types"
 )
 
 const (
@@ -18,6 +19,7 @@ const (
 	ErrStrInvalidUserIds             = "Malformed UserId"
 	ErrStrNotFoundEmails             = "Email not found"
 	ErrStrNotFoundUserIds            = "UserId not found"
+	ErrStrFieldTypeMismatch          = iterable_errors.ITERABLE_FieldTypeMismatchErrStr
 	ErrStrValidEmailFailures         = "Internal Error with Email"
 	ErrStrValidUserIdFailures        = "Internal Error with UserId"
 	ErrStrInvalidDataType            = "Invalid data type in batch request"
@@ -29,6 +31,7 @@ const (
 )
 
 var (
+	ErrApiError                   = &iterable_errors.ApiError{}
 	ErrInvalidListId              = errors.New(ErrStrInvalidListId)
 	ErrConflictEmails             = errors.New(ErrStrConflictEmails)
 	ErrConflictUserIds            = errors.New(ErrStrConflictUserIds)
@@ -40,7 +43,7 @@ var (
 	ErrInvalidUserIds             = errors.New(ErrStrInvalidUserIds)
 	ErrNotFoundEmails             = errors.New(ErrStrNotFoundEmails)
 	ErrNotFoundUserIds            = errors.New(ErrStrNotFoundUserIds)
-	ErrFieldTypeMismatch          = errors.New(iterable_errors.ITERABLE_FieldTypeMismatchErrStr)
+	ErrFieldTypeMismatch          = &ErrFieldTypeMismatchType{}
 	ErrInvalidDataType            = errors.New(ErrStrInvalidDataType)
 	ErrValidEmailFailures         = errors.New(ErrStrValidEmailFailures)
 	ErrValidUserIdFailures        = errors.New(ErrStrValidUserIdFailures)
@@ -90,3 +93,45 @@ var (
 		IterableCode:   "iterable_client_must_retry_one",
 	}
 )
+
+type ErrFieldTypeMismatchType struct {
+	fields types.MismatchedFieldsParams
+}
+
+func (e *ErrFieldTypeMismatchType) Error() string {
+	return ErrStrFieldTypeMismatch
+}
+
+func (e *ErrFieldTypeMismatchType) MismatchedFields() types.MismatchedFieldsParams {
+	return e.fields
+}
+
+// Is method is required by errors.Is() to properly distinguish between
+// different types -vs- same pointer to the same type.
+// Without it, errors.Is(err, ErrFieldTypeMismatch) returns false:
+// ok := errors.Is(errors.Join(ErrFieldTypeMismatch), ErrFieldTypeMismatch)
+// ^ would be false
+func (e *ErrFieldTypeMismatchType) Is(other error) bool {
+	var err *ErrFieldTypeMismatchType
+	return errors.As(other, &err) && err != nil
+}
+
+var _ error = &ErrFieldTypeMismatchType{}
+
+func newErrFieldTypeMismatch(fields types.MismatchedFieldsParams) *ErrFieldTypeMismatchType {
+	return &ErrFieldTypeMismatchType{fields}
+}
+
+// Unwrap returns a slice of errors from a joinError.
+// Unfortunately, we cannot use errors.Unwrap(),
+// because requires a slightly different interface: `Unwrap() error`
+// which differs from what's inside the joinError: `Unwrap() []error`
+func Unwrap(err error) []error {
+	u, ok := err.(interface {
+		Unwrap() []error
+	})
+	if !ok {
+		return nil
+	}
+	return u.Unwrap()
+}

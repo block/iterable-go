@@ -1,6 +1,9 @@
 package errors
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 const (
 	STAGE_BEFORE_REQUEST = "before-request"
@@ -44,4 +47,14 @@ func (e *ApiError) Error() string {
 		"http request to Iterable failed during '%s' stage with error type '%s', httpStatus: '%d'; original err: %v",
 		e.Stage, e.Type, e.HttpStatusCode, err,
 	)
+}
+
+// Is method is required by errors.Is() to properly distinguish between
+// different types -vs- same pointer to the same type.
+// Without it, errors.Is(err, ErrFieldTypeMismatch) returns false:
+// ok := errors.Is(errors.Join(&iterable_errors.ApiError{}), &iterable_errors.ApiError{})
+// ^ would be false
+func (e *ApiError) Is(other error) bool {
+	var err *ApiError
+	return errors.As(other, &err) && err != nil
 }
