@@ -67,27 +67,27 @@ type Response struct {
 //	    apiClient *api.Events
 //	}
 //
-//	func (h *MyHandler) ProcessBatch(messages []Message) ([]Response, error, bool) {
+//	func (h *MyHandler) ProcessBatch(messages []Message) (ProcessBatchResponse, error) {
 //	    // Convert messages to types.EventTrackBulkRequest
 //	    results, err := h.apiClient.TrackBulk(batch)
 //	    if err != nil {
-//	        return nil, err, true // error, can retry
+//	        return batch.StatusRetryIndividual{results}, err // error, can retry
 //	    }
 //	    // Convert results to Response objects
-//	    return responses, nil, false
+//	    return batch.StatusSuccess{results}, nil
 //	}
 //
 //	func (h *MyHandler) ProcessOne(message Message) Response {
 //	    // Convert message to types.EventTrackRequest
 //	    result, err := h.apiClient.Track(request)
-//	    return Response{Data: result, OriginalReq: message, Error: err}
+//	    return Response{Data: result, OriginalReq: message, Error: err, Retry: err != nil}
 //	}
 type Handler interface {
 	// ProcessBatch processes multiple messages in a single batch operation
 	// for efficiency. Returns a slice of Response objects (one per input message),
 	// an error if the entire batch failed, and a boolean indicating
 	// if the batch operation can be retried.
-	ProcessBatch(batch []Message) ([]Response, error, bool)
+	ProcessBatch(batch []Message) (ProcessBatchResponse, error)
 
 	// ProcessOne processes a single message individually, typically used
 	// for retry scenarios when batch processing fails or when individual messages
@@ -95,3 +95,59 @@ type Handler interface {
 	// Returns a single Response object with the result of processing the message.
 	ProcessOne(message Message) Response
 }
+
+// ProcessBatchResponse is an interface that defines the contract for different batch processing outcomes.
+// It provides a unified way to handle various response scenarios (success, retry, partial success, etc.)
+// while encapsulating the actual response data. Each implementation represents a specific outcome state
+// and contains the appropriate response data and any relevant error information.
+// The interface method response() returns the slice of Response objects for the batch operation.
+type ProcessBatchResponse interface {
+	response() []Response
+}
+
+// StatusSuccess represents a completely successful batch operation where all messages
+type StatusSuccess struct {
+	Response []Response
+}
+
+// StatusRetryIndividual indicates that the batch operation failed in a way that requires
+// retrying each message individually. This typically occurs when the batch operation
+// cannot determine the success/failure status of individual messages.
+// For example - when Server returns 413:ContentTooLarge, we must retry sending
+// the messages individually.
+type StatusRetryIndividual struct {
+	Response []Response
+}
+
+// StatusRetryBatch indicates that the entire batch operation should be retried as a single unit.
+// This typically occurs due to temporary issues like network problems or rate limiting.
+type StatusRetryBatch struct {
+	Response []Response
+	BatchErr error
+}
+
+// StatusCannotRetry represents a permanent failure state where retrying would not help.
+// This occurs in cases like authentication failures, malformed requests
+// or batch requests where All non-batch messages failed client validation.
+type StatusCannotRetry struct {
+	Response []Response
+}
+
+// StatusPartialSuccess indicates that some messages in the batch were processed successfully
+// while others failed. The Response slice contains a mix of successful and failed results,
+// allowing for granular handling of the partial success scenario.
+type StatusPartialSuccess struct {
+	Response []Response
+}
+
+var _ ProcessBatchResponse = StatusSuccess{}
+var _ ProcessBatchResponse = StatusRetryIndividual{}
+var _ ProcessBatchResponse = StatusRetryBatch{}
+var _ ProcessBatchResponse = StatusCannotRetry{}
+var _ ProcessBatchResponse = StatusPartialSuccess{}
+
+func (s StatusSuccess) response() []Response         { return s.Response }
+func (s StatusRetryIndividual) response() []Response { return s.Response }
+func (s StatusRetryBatch) response() []Response      { return s.Response }
+func (s StatusCannotRetry) response() []Response     { return s.Response }
+func (s StatusPartialSuccess) response() []Response  { return s.Response }

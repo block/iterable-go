@@ -191,67 +191,108 @@ func (p *processor) process(batch []Message) {
 	p.syncReq.Add(1)
 	defer p.syncReq.Done()
 
-	failed := batch
+	if len(batch) == 0 {
+		return
+	}
+
+	var batchReq []Message
+	batchReq = append(batchReq, batch...)
 
 	loopErr := p.retry.Do(
 		p.config.MaxRetries,
 		"batch.Processor.process",
 		func(attempt int) (error, retry.ExitStrategy) {
-			responses, err, canRetry := p.handler.ProcessBatch(failed)
+			batchRes, err := p.handler.ProcessBatch(batchReq)
 			if err != nil {
-				if !canRetry {
-					return err, retry.StopNow
-				}
-				return err, retry.Continue
+				return err, retry.StopNow
 			}
 
-			var retryOne []Response
-			for _, res := range responses {
-				if res.Error == nil {
-					p.sendResponse(res)
-				} else if !res.Retry {
-					p.sendResponse(res)
-				} else {
-					retryOne = append(retryOne, res)
+			switch status := batchRes.(type) {
+			case StatusRetryBatch:
+				return status.BatchErr, retry.Continue
+			case StatusCannotRetry:
+				for _, msgRes := range status.Response {
+					p.sendResponse(msgRes)
 				}
-			}
-
-			failed = nil
-			p.logger.Debugf("Processor will individually retry for %d messages", len(retryOne))
-
-			g := errgroup.Group{}
-			g.SetLimit(p.config.NumOfIndividualGoroutines)
-			for _, res := range retryOne {
-				if p.config.sendIndividual {
-					g.Go(func() error {
-						resOne := p.handler.ProcessOne(res.OriginalReq)
-						p.sendResponse(resOne)
-						return nil
+				batchReq = nil
+				return nil, retry.StopNow
+			case StatusSuccess:
+				for _, msgRes := range status.Response {
+					p.sendResponse(msgRes)
+				}
+				batchReq = nil
+				return nil, retry.StopNow
+			case StatusPartialSuccess:
+				var retryOne []Response
+				for _, msgRes := range status.Response {
+					if msgRes.Error == nil {
+						p.sendResponse(msgRes)
+					} else if !msgRes.Retry {
+						p.sendResponse(msgRes)
+					} else {
+						retryOne = append(retryOne, msgRes)
+					}
+				}
+				p.retryIndividual(retryOne)
+				batchReq = nil
+				return nil, retry.StopNow
+			case StatusRetryIndividual:
+				var retryOne []Response
+				for _, msgRes := range status.Response {
+					retryOne = append(retryOne, msgRes)
+				}
+				p.retryIndividual(retryOne)
+				batchReq = nil
+				return nil, retry.StopNow
+			default:
+				p.logger.Errorf("Processor entered an invalid state. Status=%t cannot be handled.", status)
+				for _, msgReq := range batchReq {
+					p.sendResponse(Response{
+						OriginalReq: msgReq,
+						Error:       ErrInvalidBatchProcessorState,
+						Retry:       false,
 					})
-				} else {
-					p.sendResponse(res)
 				}
+				batchReq = nil
+				return nil, retry.StopNow
 			}
-			waitErr := g.Wait()
-			if waitErr != nil {
-				p.logger.Errorf(
-					"Processor failed to wait for an errgroup (to send messages individually): %v",
-					waitErr,
-				)
-			}
-			return nil, retry.StopNow
 		},
 	)
 
 	// Send remaining failed responses.
-	// These are messages that were part of a non-retriable batch
-	// request error which should be retried.
-	for _, req := range failed {
+	// These are the messages that failed all retry attempts.
+	for _, msgReq := range batchReq {
 		p.sendResponse(Response{
-			OriginalReq: req,
+			OriginalReq: msgReq,
 			Error:       loopErr,
 			Retry:       true,
 		})
+	}
+}
+
+func (p *processor) retryIndividual(retryOne []Response) {
+	if len(retryOne) > 0 {
+		p.logger.Debugf("Processor will individually retry for %d messages", len(retryOne))
+		g := errgroup.Group{}
+		g.SetLimit(p.config.NumOfIndividualGoroutines)
+		for _, res := range retryOne {
+			if p.config.sendIndividual {
+				g.Go(func() error {
+					resOne := p.handler.ProcessOne(res.OriginalReq)
+					p.sendResponse(resOne)
+					return nil
+				})
+			} else {
+				p.sendResponse(res)
+			}
+		}
+		waitErr := g.Wait()
+		if waitErr != nil {
+			p.logger.Errorf(
+				"Processor failed to wait for an errgroup (to send messages individually): %v",
+				waitErr,
+			)
+		}
 	}
 }
 
