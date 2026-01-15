@@ -11,7 +11,6 @@ import (
 
 	"github.com/block/iterable-go/logger"
 	"github.com/block/iterable-go/retry"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -161,40 +160,47 @@ func TestBatchProcessor_config(t *testing.T) {
 func TestBatchProcessor_batchSizes(t *testing.T) {
 	testCases := []struct {
 		name             string
+		batchSize        int
 		msgCnt           int
 		expectedBatchCnt int
 	}{
 		{
 			name:             "full batch",
-			msgCnt:           testMaxBatchSize,
+			batchSize:        10,
+			msgCnt:           10,
 			expectedBatchCnt: 1,
 		},
 		{
 			name:             "partial batch",
-			msgCnt:           testMaxBatchSize - 1,
+			batchSize:        10,
+			msgCnt:           9,
 			expectedBatchCnt: 1,
 		},
 		{
 			name:             "multiple batches",
-			msgCnt:           testMaxBatchSize*5 - 1,
+			batchSize:        10,
+			msgCnt:           49,
 			expectedBatchCnt: 5,
 		},
 		{
 			name:             "no batch",
+			batchSize:        10,
 			msgCnt:           0,
 			expectedBatchCnt: 0,
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			handler := &fakeBatchHandler{}
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := newFakeBatchHandler()
+			cfg := testBatchProcessorConfig(IsFalse)
+			cfg.FlushQueueSize = tt.batchSize
+
 			p, respChan := testBatchProcessor(
-				handler,
-				testBatchProcessorConfig(IsFalse),
+				handler, cfg,
 			)
 
-			for i := range tc.msgCnt {
+			for i := range tt.msgCnt {
 				p.Add(Message{
 					Data: strconv.Itoa(i),
 				})
@@ -203,55 +209,86 @@ func TestBatchProcessor_batchSizes(t *testing.T) {
 			p.Start()
 			p.Stop()
 
-			resp := getMessagesOffChan(respChan)
+			res := getMessagesOffChan(respChan)
 
-			assert.Equal(t, tc.expectedBatchCnt, handler.batchReqCount)
-			assert.Equal(t, tc.msgCnt, handler.totalBatchMessages)
-			assert.Equal(t, tc.msgCnt, len(resp))
-			assertFailedMessages(t, 0, resp)
+			assert.Equal(t, tt.expectedBatchCnt, handler.batchReqCount)
+			assert.Equal(t, tt.msgCnt, handler.totalBatchMessages)
+			assert.Equal(t, tt.msgCnt, len(res))
+			assertFailedMessages(t, 0, res)
 		})
 	}
 }
 
-func TestBatchProcessor_batch_retries(t *testing.T) {
-	handler := &fakeBatchHandler{
-		shouldFailBatch: failCertainRequests,
-	}
+func TestBatchProcessor_batch_fails_no_retry(t *testing.T) {
+	handler := newFakeBatchHandler()
+	handler.shouldFailBatch = IsTrue
+
 	p, respChan := testBatchProcessor(
 		handler,
 		testBatchProcessorConfig(IsFalse),
 	)
 
-	// Add a request that will fail
 	p.Add(Message{
 		Data: testFailureMessage,
 	})
 	p.Add(Message{
-		Data: "success",
+		Data: testFailureMessage,
 	})
 
 	p.Start()
 	p.Stop()
 
-	resp := getMessagesOffChan(respChan)
+	res := getMessagesOffChan(respChan)
 
-	assert.Equal(t, testMaxRetries, handler.batchReqCount)
+	assert.Equal(t, 1, handler.batchReqCount)
 	assert.Equal(t, 0, handler.nonBatchReqCount)
-	assert.Equal(t, testMaxRetries*2, handler.totalBatchMessages)
-	assert.Equal(t, 2, len(resp))
-	assertFailedMessages(t, 2, resp)
+	assert.Equal(t, 2, handler.totalBatchMessages)
+	assert.Equal(t, 2, len(res))
+	assertFailedMessages(t, 2, res)
 }
 
-func TestBatchProcessor_individual_retries(t *testing.T) {
-	handler := &fakeBatchHandler{
-		shouldFailMsgInBatch: failCertainRequests,
-	}
+func TestBatchProcessor_batch_fails_retry(t *testing.T) {
+	handler := newFakeBatchHandler()
+	handler.shouldRetryBatch = IsTrue
+
+	cfg := testBatchProcessorConfig(IsFalse)
+	cfg.MaxRetries = 2
+
+	p, respChan := testBatchProcessor(
+		handler,
+		cfg,
+	)
+
+	p.Add(Message{
+		Data: testFailureMessage,
+	})
+	p.Add(Message{
+		Data: testFailureMessage,
+	})
+
+	p.Start()
+	p.Stop()
+
+	res := getMessagesOffChan(respChan)
+
+	assert.Equal(t, 2, handler.batchReqCount)
+	assert.Equal(t, 0, handler.nonBatchReqCount)
+	assert.Equal(t, 4, handler.totalBatchMessages)
+	assert.Equal(t, 2, len(res))
+	assertFailedMessages(t, 2, res)
+}
+
+func TestBatchProcessor_batch_fails_retry_one_partial(t *testing.T) {
+	handler := newFakeBatchHandler()
+	handler.shouldRetryOnePartial = failCertainRequests
+	cfg := testBatchProcessorConfig(IsFalse)
+	cfg.MaxRetries = 2
+
 	p, respChan := testBatchProcessor(
 		handler,
 		testBatchProcessorConfig(IsFalse),
 	)
 
-	// Add a request that will fail
 	p.Add(Message{
 		Data: testFailureMessage,
 	})
@@ -262,24 +299,80 @@ func TestBatchProcessor_individual_retries(t *testing.T) {
 	p.Start()
 	p.Stop()
 
-	resp := getMessagesOffChan(respChan)
+	res := getMessagesOffChan(respChan)
 
 	assert.Equal(t, 1, handler.batchReqCount)
 	assert.Equal(t, 2, handler.totalBatchMessages)
 	assert.Equal(t, 1, handler.nonBatchReqCount)
-	assert.Equal(t, 2, len(resp))
-	assertFailedMessages(t, 0, resp)
+	assert.Equal(t, 2, len(res))
+	assertFailedMessages(t, 0, res)
 }
 
-func TestBatchProcessor_no_individual_retries(t *testing.T) {
-	handler := &fakeBatchHandler{
-		shouldFailMsgInBatch: failCertainRequests,
-	}
+func TestBatchProcessor_batch_fails_retry_one_all(t *testing.T) {
+	handler := newFakeBatchHandler()
+	handler.shouldRetryOneAll = failCertainRequests
+	cfg := testBatchProcessorConfig(IsFalse)
+	cfg.MaxRetries = 2
+
+	p, respChan := testBatchProcessor(
+		handler,
+		testBatchProcessorConfig(IsFalse),
+	)
+
+	p.Add(Message{
+		Data: testFailureMessage,
+	})
+	p.Add(Message{
+		Data: testFailureMessage,
+	})
+
+	p.Start()
+	p.Stop()
+
+	res := getMessagesOffChan(respChan)
+
+	assert.Equal(t, 1, handler.batchReqCount)
+	assert.Equal(t, 2, handler.totalBatchMessages)
+	assert.Equal(t, 2, handler.nonBatchReqCount)
+	assert.Equal(t, 2, len(res))
+	assertFailedMessages(t, 0, res)
+}
+
+func TestBatchProcessor_batch_fails_send_one_is_disabled_1(t *testing.T) {
+	handler := newFakeBatchHandler()
+	handler.shouldRetryOneAll = failCertainRequests
+
 	c := testBatchProcessorConfig(IsFalse)
-	c.SendIndividual = func() bool { return false }
+	c.SendIndividual = IsFalse
 	p, respChan := testBatchProcessor(handler, c)
 
-	// Add a request that will fail
+	p.Add(Message{
+		Data: testFailureMessage,
+	})
+	p.Add(Message{
+		Data: testFailureMessage,
+	})
+
+	p.Start()
+	p.Stop()
+
+	res := getMessagesOffChan(respChan)
+
+	assert.Equal(t, 1, handler.batchReqCount)
+	assert.Equal(t, 2, handler.totalBatchMessages)
+	assert.Equal(t, 0, handler.nonBatchReqCount)
+	assert.Equal(t, 2, len(res))
+	assertFailedMessages(t, 2, res)
+}
+
+func TestBatchProcessor_batch_fails_send_one_is_disabled_2(t *testing.T) {
+	handler := newFakeBatchHandler()
+	handler.shouldRetryOnePartial = failCertainRequests
+
+	c := testBatchProcessorConfig(IsFalse)
+	c.SendIndividual = IsFalse
+	p, respChan := testBatchProcessor(handler, c)
+
 	p.Add(Message{
 		Data: testFailureMessage,
 	})
@@ -290,17 +383,17 @@ func TestBatchProcessor_no_individual_retries(t *testing.T) {
 	p.Start()
 	p.Stop()
 
-	resp := getMessagesOffChan(respChan)
+	res := getMessagesOffChan(respChan)
 
 	assert.Equal(t, 1, handler.batchReqCount)
 	assert.Equal(t, 2, handler.totalBatchMessages)
 	assert.Equal(t, 0, handler.nonBatchReqCount)
-	assert.Equal(t, 2, len(resp))
-	assertFailedMessages(t, 1, resp)
+	assert.Equal(t, 2, len(res))
+	assertFailedMessages(t, 1, res)
 }
 
 func TestBatchProcessor_nil_response_chan(t *testing.T) {
-	handler := &fakeBatchHandler{}
+	handler := newFakeBatchHandler()
 	p := NewProcessor(
 		handler,
 		nil,
@@ -323,9 +416,9 @@ func TestBatchProcessor_nil_response_chan(t *testing.T) {
 
 func TestBatchProcessor_Start_Stop_Async_race(t *testing.T) {
 	respChan := make(chan Response, 100_000)
-	handler := &fakeBatchHandler{
-		shouldFailBatch: failCertainRequests,
-	}
+	handler := newFakeBatchHandler()
+	handler.shouldFailBatch = IsTrue
+
 	cfg := testBatchProcessorConfig(IsFalse)
 	cfg.FlushQueueSize = 10
 	cfg.MaxBufferSize = 100_000
@@ -344,18 +437,18 @@ func TestBatchProcessor_Start_Stop_Async_race(t *testing.T) {
 
 	p.Start()
 	p.Stop()
-	resp := getMessagesOffChan(respChan)
+	res := getMessagesOffChan(respChan)
 
 	assert.Equal(t, 2_000, handler.batchReqCount)
 	assert.Equal(t, 0, handler.nonBatchReqCount)
 	assert.Equal(t, 20_000, handler.totalBatchMessages)
-	assert.Equal(t, 20_000, len(resp))
-	assertFailedMessages(t, 0, resp)
+	assert.Equal(t, 20_000, len(res))
+	assertFailedMessages(t, 20_000, res)
 
 }
 
 func TestBatchProcessor_Start_Stop_Start_Stop(t *testing.T) {
-	handler := &fakeBatchHandler{}
+	handler := newFakeBatchHandler()
 	p, respChan := testBatchProcessor(
 		handler,
 		testBatchProcessorConfig(IsTrue),
@@ -397,7 +490,7 @@ func TestBatchProcessor_Start_Stop_Start_Stop(t *testing.T) {
 }
 
 func TestBatchProcessor_Stop_Stop_Start_Stop(t *testing.T) {
-	handler := &fakeBatchHandler{}
+	handler := newFakeBatchHandler()
 	p, respChan := testBatchProcessor(
 		handler,
 		testBatchProcessorConfig(IsTrue),
@@ -439,7 +532,7 @@ func TestBatchProcessor_Stop_Stop_Start_Stop(t *testing.T) {
 }
 
 func TestBatchProcessor_Start_Start_Stop(t *testing.T) {
-	handler := &fakeBatchHandler{}
+	handler := newFakeBatchHandler()
 	p, respChan := testBatchProcessor(
 		handler,
 		testBatchProcessorConfig(IsTrue),
@@ -483,7 +576,7 @@ func TestBatchProcessor_Start_Start_Stop(t *testing.T) {
 
 func TestBatchProcessor_Stop_Add_race(t *testing.T) {
 	respChan := make(chan Response, 100_000)
-	handler := &fakeBatchHandler{}
+	handler := newFakeBatchHandler()
 	cfg := testBatchProcessorConfig(IsFalse)
 	cfg.FlushQueueSize = 2
 	cfg.MaxBufferSize = 100_000
@@ -559,28 +652,77 @@ func getMessagesOffChan(c chan Response) []Response {
 }
 
 type fakeBatchHandler struct {
-	batchReqCount        int
-	nonBatchReqCount     int
-	totalBatchMessages   int
-	shouldFailBatch      func(interface{}) bool
-	shouldFailMsgInBatch func(interface{}) bool
-	shouldFailOne        func(interface{}) bool
-	mu                   sync.Mutex
+	batchReqCount         int
+	nonBatchReqCount      int
+	totalBatchMessages    int
+	shouldFailBatch       func() bool
+	shouldRetryBatch      func() bool
+	shouldRetryOnePartial func(any) bool
+	shouldRetryOneAll     func(any) bool
+	shouldFailOne         func() bool
+	mu                    sync.Mutex
 }
 
 var _ Handler = &fakeBatchHandler{}
 
-func (f *fakeBatchHandler) ProcessBatch(batch []Message) ([]Response, error, bool) {
+func newFakeBatchHandler() *fakeBatchHandler {
+	return &fakeBatchHandler{
+		batchReqCount:      0,
+		nonBatchReqCount:   0,
+		totalBatchMessages: 0,
+		shouldFailBatch: func() bool {
+			return false
+		},
+		shouldRetryBatch: func() bool {
+			return false
+		},
+		shouldRetryOnePartial: func(_ any) bool {
+			return false
+		},
+		shouldRetryOneAll: func(_ any) bool {
+			return false
+		},
+		shouldFailOne: func() bool {
+			return false
+		},
+	}
+}
+
+func (f *fakeBatchHandler) ProcessBatch(batch []Message) (ProcessBatchResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	f.batchReqCount++
 	f.totalBatchMessages += len(batch)
 	res := make([]Response, 0)
+	failBatch := false
+	retryBatch := false
+	retryOnePartial := false
+	retryOneAll := false
 	for _, req := range batch {
-		if f.shouldFailBatch != nil && f.shouldFailBatch(req.Data) {
-			return nil, errors.New("failed"), true
-		} else if f.shouldFailMsgInBatch != nil && f.shouldFailMsgInBatch(req.Data) {
+		if f.shouldFailBatch() {
+			failBatch = true
+			res = append(res, Response{
+				Error:       errors.New("failed"),
+				OriginalReq: req,
+				Retry:       true,
+			})
+		} else if f.shouldRetryBatch() {
+			retryBatch = true
+			res = append(res, Response{
+				Error:       errors.New("failed"),
+				OriginalReq: req,
+				Retry:       true,
+			})
+		} else if f.shouldRetryOnePartial(req.Data) {
+			retryOnePartial = true
+			res = append(res, Response{
+				Error:       errors.New("failed"),
+				OriginalReq: req,
+				Retry:       true,
+			})
+		} else if f.shouldRetryOneAll(req.Data) {
+			retryOneAll = true
 			res = append(res, Response{
 				Error:       errors.New("failed"),
 				OriginalReq: req,
@@ -592,7 +734,21 @@ func (f *fakeBatchHandler) ProcessBatch(batch []Message) ([]Response, error, boo
 			})
 		}
 	}
-	return res, nil, false
+
+	if failBatch {
+		return StatusCannotRetry{res}, nil
+	}
+	if retryBatch {
+		return StatusRetryBatch{res, errors.New("failed")}, nil
+	}
+	if retryOnePartial {
+		return StatusPartialSuccess{res}, nil
+	}
+	if retryOneAll {
+		return StatusRetryIndividual{res}, nil
+	}
+
+	return StatusSuccess{res}, nil
 }
 
 func (f *fakeBatchHandler) ProcessOne(req Message) Response {
@@ -600,7 +756,7 @@ func (f *fakeBatchHandler) ProcessOne(req Message) Response {
 	defer f.mu.Unlock()
 
 	f.nonBatchReqCount++
-	if f.shouldFailOne != nil && f.shouldFailOne(req.Data) {
+	if f.shouldFailOne() {
 		return Response{
 			Error:       errors.New("failed"),
 			OriginalReq: req,

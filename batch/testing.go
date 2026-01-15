@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 
 	iterable_errors "github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/types"
@@ -29,7 +30,7 @@ func NewTestBatchHandler() *TestBatchHandler {
 	return &TestBatchHandler{}
 }
 
-func (h *TestBatchHandler) ProcessBatch(batch []Message) ([]Response, error, bool) {
+func (h *TestBatchHandler) ProcessBatch(batch []Message) (ProcessBatchResponse, error) {
 	responses := make([]Response, 0)
 	for _, req := range batch {
 		if req.Data == SuccessfulTestData {
@@ -55,7 +56,7 @@ func (h *TestBatchHandler) ProcessBatch(batch []Message) ([]Response, error, boo
 			})
 		}
 	}
-	return responses, nil, false
+	return StatusPartialSuccess{responses}, nil
 }
 
 func (h *TestBatchHandler) ProcessOne(message Message) Response {
@@ -95,6 +96,9 @@ type fakeTransport struct {
 	batchContentTooLargeCnt    int
 	reqCnt                     int
 	disallowedEventNames       []string
+
+	responseQueue []http.Response
+	mu            sync.Mutex
 }
 
 func NewFakeTransport(failCnt int, rateLimitCnt int) *fakeTransport {
@@ -112,8 +116,28 @@ func (m *fakeTransport) SetDisallowedEventNames(eventNames []string) {
 	m.disallowedEventNames = eventNames
 }
 
+func (m *fakeTransport) AddResponseQueue(statusCode int, body []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.responseQueue = append(m.responseQueue, http.Response{
+		StatusCode: statusCode,
+		Status:     http.StatusText(statusCode),
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	})
+}
+
 func (m *fakeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.reqCnt++
+	if len(m.responseQueue) > 0 {
+		res := m.responseQueue[0]
+		m.responseQueue = m.responseQueue[1:]
+		return &res, nil
+	}
+
 	if m.batchFailCnt < m.setBatchFailCnt {
 		m.batchFailCnt++
 		res := types.PostResponse{

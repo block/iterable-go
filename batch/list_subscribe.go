@@ -2,23 +2,14 @@ package batch
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
-	"time"
 
 	"github.com/block/iterable-go/api"
 	iterable_errors "github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
 	"github.com/block/iterable-go/retry"
 	"github.com/block/iterable-go/types"
-)
-
-var (
-	NoIndividualRetryError = &iterable_errors.ApiError{
-		Stage:          iterable_errors.STAGE_BEFORE_REQUEST,
-		Type:           "no_list_subscribe_individual_retry",
-		HttpStatusCode: 0,
-		IterableCode:   "no_individual_retry",
-	}
 )
 
 type listSubscribeBatch struct {
@@ -54,97 +45,119 @@ func NewListSubscribeHandler(
 	return &listSubscribeHandler{
 		client: client,
 		logger: logger,
-		retry: retry.NewExponentialRetry(
-			retry.WithInitialDuration(10*time.Millisecond),
-			retry.WithLogger(logger),
-		),
 	}
 }
 
-func (s *listSubscribeHandler) ProcessBatch(batch []Message) ([]Response, error, bool) {
-	batchReqMap, responses := s.generatePayloads(batch)
+func (s *listSubscribeHandler) ProcessBatch(batch []Message) (ProcessBatchResponse, error) {
+	batchReqs, cannotRetry := s.generatePayloads(batch)
 
-	for _, batchReq := range batchReqMap {
-		var res *types.ListSubscribeResponse
-		var err error
-		err = s.retry.Do(3, "list-subscribe", func(attempt int) (error, retry.ExitStrategy) {
-			res, err = s.client.Subscribe(batchReq.batch)
-			s.logger.Debugf("ListSubscribe response: %+v, err: %+v", res, err)
-			if shouldRetry(err) {
-				return err, retry.Continue
-			} else {
-				return err, retry.StopNow
-			}
-		})
+	var result []Response
+	result = append(result, cannotRetry...)
+	if len(batchReqs) == 0 {
+		if len(cannotRetry) != 0 {
+			return StatusCannotRetry{result}, nil
+		}
+		return StatusSuccess{result}, nil
+	}
+
+	for _, batchReq := range batchReqs {
+		res, err := s.client.Subscribe(batchReq.batch)
 		// Check for failures and don't try invalid listIds, but make sure to retry other
 		// subscribe requests
 		if err != nil {
-			if apiErr := err.(*iterable_errors.ApiError); apiErr != nil {
-				resp := &types.PostResponse{}
-				errU := json.Unmarshal(apiErr.Body, resp)
-				if errU == nil {
-					if strings.Contains(resp.Message, iterable_errors.ITERABLE_InvalidList) {
-						responses = addReqFailuresToResponses(batchReq.reqByEmailMap, responses, InvalidListId, false)
-						responses = addReqFailuresToResponses(batchReq.reqByUserIdMap, responses, InvalidListId, false)
-					} else {
-						responses = addReqFailuresToResponses(batchReq.reqByEmailMap, responses, apiErr.IterableCode, shouldRetry(err))
-						responses = addReqFailuresToResponses(batchReq.reqByUserIdMap, responses, apiErr.IterableCode, shouldRetry(err))
-					}
-				}
-			} else {
-				// If there is some non-API error, log it and retry
-				responses = addReqFailuresToResponses(batchReq.reqByEmailMap, responses, UnknownError, true)
-				responses = addReqFailuresToResponses(batchReq.reqByUserIdMap, responses, UnknownError, true)
-			}
-		} else {
-			// Map email/userId failures back to requests
-			responses = parseReqFailures(res.FailedUpdates.ConflictEmails, batchReq.reqByEmailMap, responses, ConflictEmailsErr)
-			responses = parseReqFailures(res.FailedUpdates.ConflictUserIds, batchReq.reqByUserIdMap, responses, ConflictUserIdsErr)
-			responses = parseReqFailures(res.FailedUpdates.ForgottenEmails, batchReq.reqByEmailMap, responses, ForgottenEmailsErr)
-			responses = parseReqFailures(res.FailedUpdates.ForgottenUserIds, batchReq.reqByUserIdMap, responses, ForgottenUserIdsErr)
-			responses = parseReqFailures(res.FailedUpdates.InvalidDataEmails, batchReq.reqByEmailMap, responses, InvalidDataEmailsErr)
-			responses = parseReqFailures(res.FailedUpdates.InvalidDataUserIds, batchReq.reqByUserIdMap, responses, InvalidDataUserIdsErr)
-			responses = parseReqFailures(res.FailedUpdates.InvalidEmails, batchReq.reqByEmailMap, responses, InvalidEmailsErr)
-			responses = parseReqFailures(res.FailedUpdates.InvalidUserIds, batchReq.reqByUserIdMap, responses, InvalidUserIdsErr)
-			responses = parseReqFailures(res.FailedUpdates.NotFoundEmails, batchReq.reqByEmailMap, responses, NotFoundEmailsErr)
-			responses = parseReqFailures(res.FailedUpdates.NotFoundUserIds, batchReq.reqByUserIdMap, responses, NotFoundUserIdsErr)
+			messages := flatValues(batchReq.reqByEmailMap, batchReq.reqByUserIdMap)
 
-			// Add success to remaining requests
-			responses = addReqSuccessToResponses(batchReq.reqByEmailMap, responses)
-			responses = addReqSuccessToResponses(batchReq.reqByUserIdMap, responses)
+			var apiErr *iterable_errors.ApiError
+			if !errors.As(err, &apiErr) || apiErr == nil {
+				result = append(result, toFailures(messages, err, false)...)
+				continue
+			}
+
+			res2 := types.PostResponse{}
+			errU := json.Unmarshal(apiErr.Body, &res2)
+			if errU != nil {
+				err2 := errors.Join(errU, err)
+				// If there's 1 bad message that makes the json invalid,
+				// retrying individually should allow us to find the message.
+				result = append(result, toFailures(messages, err2, true)...)
+				continue
+			}
+
+			if strings.Contains(res2.Message, iterable_errors.ITERABLE_InvalidList) {
+				err2 := errors.Join(ErrInvalidListId, err)
+				result = append(result, toFailures(messages, err2, false)...)
+				continue
+			}
+
+			// Never return StatusRetryBatch, because one call to ProcessBatch
+			// spawns multiple calls to Iterable.
+			if batchCanRetryOne(apiErr) {
+				result = append(result, toFailures(messages, err, true)...)
+				continue
+			}
+
+			result = append(result, toFailures(messages, err, false)...)
+			continue
+		}
+
+		var sentAndFailed []Response
+		f := res.FailedUpdates
+
+		// Map email/userId failures back to requests
+		sentAndFailed = append(sentAndFailed, parseFailures(f.ConflictEmails, batchReq.reqByEmailMap, ErrConflictEmails)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.ConflictUserIds, batchReq.reqByUserIdMap, ErrConflictUserIds)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.ForgottenEmails, batchReq.reqByEmailMap, ErrForgottenEmails)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.ForgottenUserIds, batchReq.reqByUserIdMap, ErrForgottenUserIds)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.InvalidDataEmails, batchReq.reqByEmailMap, ErrInvalidDataEmails)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.InvalidDataUserIds, batchReq.reqByUserIdMap, ErrInvalidDataUserIds)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.InvalidEmails, batchReq.reqByEmailMap, ErrInvalidEmails)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.InvalidUserIds, batchReq.reqByUserIdMap, ErrInvalidUserIds)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.NotFoundEmails, batchReq.reqByEmailMap, ErrNotFoundEmails)...)
+		sentAndFailed = append(sentAndFailed, parseFailures(f.NotFoundUserIds, batchReq.reqByUserIdMap, ErrNotFoundUserIds)...)
+
+		// Add success to remaining requests
+		result = append(result, sentAndFailed...)
+		result = append(result, toSuccess(batchReq.reqByEmailMap)...)
+		result = append(result, toSuccess(batchReq.reqByUserIdMap)...)
+	}
+
+	for _, r := range result {
+		if r.Error != nil {
+			return StatusPartialSuccess{result}, nil
 		}
 	}
 
-	return responses, nil, false
+	return StatusSuccess{result}, nil
 }
 
 func (s *listSubscribeHandler) ProcessOne(req Message) Response {
 	// This is a no-op for the listSubscribeHandler, we don't want to send
 	// individual requests for ListSubscribe since it will use up our rate limit
-	// We can nack the message and it should get retried as a batchs
-	return Response{
-		OriginalReq: req,
-		Error:       NoIndividualRetryError,
-		Retry:       true,
-	}
+	// We can nack the message, it should get retried as a batch request.
+	err := errors.Join(ErrProcessOneNotAllowed, ErrClientMustRetryBatchApiErr)
+	return toFailure(req, err, true)
 }
 
 func (s *listSubscribeHandler) generatePayloads(
 	messages []Message,
-) (map[int64]*listSubscribeBatch, []Response) {
-	var responses []Response
+) ([]*listSubscribeBatch, []Response) {
+	var batchReqs []*listSubscribeBatch
+	var cannotRetry []Response
+
 	batchMap := make(map[int64]*listSubscribeBatch)
 	for _, req := range messages {
-		if subData, ok := req.Data.(*types.ListSubscribeRequest); ok {
-			newBatch, batchFound := batchMap[subData.ListId]
+		if data, ok := req.Data.(*types.ListSubscribeRequest); ok {
+			newBatch, batchFound := batchMap[data.ListId]
 			if !batchFound {
-				// The new batch will inherit the UpdateExistingUsersOnly flag from the first request
-				// TODO: This could be a parameter when initializing the batch processor instead
-				newBatch = newListSubscribeBatch(subData.ListId, subData.UpdateExistingUsersOnly)
-				batchMap[subData.ListId] = newBatch
+				// NOTE: The new batch will inherit the UpdateExistingUsersOnly flag,
+				// from the first request.
+				// This could be a parameter when initializing the batch processor instead
+				newBatch = newListSubscribeBatch(data.ListId, data.UpdateExistingUsersOnly)
+				batchMap[data.ListId] = newBatch
+				batchReqs = append(batchReqs, newBatch)
 			}
 
-			for _, subscriber := range subData.Subscribers {
+			for _, subscriber := range data.Subscribers {
 				if subscriber.Email != "" {
 					addReqToMap(newBatch.reqByEmailMap, req, subscriber.Email)
 				} else {
@@ -153,13 +166,13 @@ func (s *listSubscribeHandler) generatePayloads(
 				newBatch.batch.Subscribers = append(newBatch.batch.Subscribers, subscriber)
 			}
 		} else {
-			s.logger.Errorf("Invalid data type in ListSubscribe batch request")
-			responses = append(responses, Response{
+			s.logger.Errorf("Invalid data type in ListSubscribe/ProcessBatch: %t", req.Data)
+			cannotRetry = append(cannotRetry, Response{
 				OriginalReq: req,
-				Error:       InvalidDataErr,
+				Error:       ErrInvalidDataType,
 			})
 		}
 	}
 
-	return batchMap, responses
+	return batchReqs, cannotRetry
 }

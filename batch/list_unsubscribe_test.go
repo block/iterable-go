@@ -1,124 +1,261 @@
 package batch
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"testing"
 
 	"github.com/block/iterable-go/api"
+	iterable_errors "github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
 	"github.com/block/iterable-go/rate"
 	"github.com/block/iterable-go/types"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestListUnSubscribeBatchHandler_ProcessBatch(t *testing.T) {
 	tests := []struct {
-		name                    string
-		failCnt                 int
-		rateLimitCnt            int
-		uniqueIds               bool
-		noEmailCnt              int
-		expectedErr             bool
-		expectedRetry           bool
-		expectedReqCnt          int
-		expectedResLen          int
-		expectedIndividualRetry int
+		name             string
+		batchSize        int
+		invalidSize      int
+		resStatusCode    int
+		resBody          []byte
+		expectApiCalls   int
+		expectErr        bool
+		expectStatus     ProcessBatchResponse
+		expectMsgNoRetry int
+		expectMsgRetry   int
+		expectMsgError   int
+		expectMsgNoError int
 	}{
 		{
-			name:                    "Success",
-			failCnt:                 0,
-			rateLimitCnt:            0,
-			uniqueIds:               false,
-			expectedErr:             false,
-			expectedRetry:           false,
-			expectedReqCnt:          1,
-			expectedResLen:          10,
-			expectedIndividualRetry: 0,
+			name:             "Empty",
+			batchSize:        0,
+			resStatusCode:    200,
+			expectApiCalls:   0,
+			expectErr:        false,
+			expectStatus:     StatusSuccess{},
+			expectMsgNoRetry: 0,
+			expectMsgRetry:   0,
+			expectMsgError:   0,
+			expectMsgNoError: 0,
 		},
 		{
-			name:                    "UniqueIds",
-			failCnt:                 0,
-			rateLimitCnt:            0,
-			uniqueIds:               true,
-			expectedErr:             false,
-			expectedRetry:           false,
-			expectedReqCnt:          10,
-			expectedResLen:          10,
-			expectedIndividualRetry: 0,
+			name:             "Success",
+			batchSize:        10,
+			resStatusCode:    200,
+			resBody:          []byte(`{"successCount":10}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusSuccess{},
+			expectMsgNoRetry: 0,
+			expectMsgRetry:   0,
+			expectMsgError:   0,
+			expectMsgNoError: 10,
 		},
 		{
-			name:                    "Fail",
-			failCnt:                 2,
-			rateLimitCnt:            0,
-			uniqueIds:               false,
-			expectedErr:             false,
-			expectedRetry:           false,
-			expectedReqCnt:          3,
-			expectedResLen:          10,
-			expectedIndividualRetry: 0,
+			name:             "Batch Request: 500 no body",
+			batchSize:        10,
+			resStatusCode:    500,
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 0,
+			expectMsgRetry:   10,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
 		},
 		{
-			name:                    "RateLimit",
-			failCnt:                 0,
-			rateLimitCnt:            3,
-			uniqueIds:               false,
-			expectedErr:             false,
-			expectedRetry:           false,
-			expectedReqCnt:          3,
-			expectedResLen:          10,
-			expectedIndividualRetry: 10,
+			name:             "Batch Request: 500 with body",
+			batchSize:        10,
+			resStatusCode:    500,
+			resBody:          []byte(`{}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 0,
+			expectMsgRetry:   10,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
 		},
 		{
-			name:                    "FailUnique",
-			failCnt:                 3,
-			rateLimitCnt:            0,
-			uniqueIds:               true,
-			expectedErr:             false,
-			expectedRetry:           false,
-			expectedReqCnt:          12,
-			expectedResLen:          10,
-			expectedIndividualRetry: 1,
-			noEmailCnt:              1,
+			name:             "Batch Request: 500 + ITERABLE_InvalidList",
+			batchSize:        10,
+			resStatusCode:    500,
+			resBody:          []byte(`{"msg":"123 error.lists.invalidListId abc"}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 10,
+			expectMsgRetry:   0,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
+		},
+		{
+			name:             "Batch Request: RateLimit",
+			batchSize:        10,
+			resStatusCode:    429,
+			resBody:          []byte(`{}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 0,
+			expectMsgRetry:   10,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
+		},
+		{
+			name:             "Batch Request: ContentTooLarge",
+			batchSize:        10,
+			resStatusCode:    413,
+			resBody:          []byte(`{}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 0,
+			expectMsgRetry:   10,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
+		},
+		{
+			name:             "Batch Request: Conflict",
+			batchSize:        10,
+			resStatusCode:    409,
+			resBody:          []byte(`{}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 0,
+			expectMsgRetry:   10,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
+		},
+		{
+			name:             "Batch Request: Request Timeout",
+			batchSize:        10,
+			resStatusCode:    408,
+			resBody:          []byte(`{}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 0,
+			expectMsgRetry:   10,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
+		},
+		{
+			name:             "Batch Request: Forbidden",
+			batchSize:        10,
+			resStatusCode:    403,
+			resBody:          []byte(`{}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 10,
+			expectMsgRetry:   0,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
+		},
+		{
+			name:             "Batch Request: 400",
+			batchSize:        10,
+			resStatusCode:    400,
+			resBody:          []byte(`{}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 10,
+			expectMsgRetry:   0,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
+		},
+		{
+			name:             "Batch Request: 400 + ITERABLE_InvalidList",
+			batchSize:        10,
+			resStatusCode:    400,
+			resBody:          []byte(`{"msg":"123 error.lists.invalidListId abc"}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 10,
+			expectMsgRetry:   0,
+			expectMsgError:   10,
+			expectMsgNoError: 0,
+		},
+		{
+			name:             "Batch Request: 200 + invalid messages",
+			batchSize:        10,
+			invalidSize:      5,
+			resStatusCode:    200,
+			resBody:          []byte(`{}`),
+			expectApiCalls:   1,
+			expectErr:        false,
+			expectStatus:     StatusPartialSuccess{},
+			expectMsgNoRetry: 5,
+			expectMsgRetry:   0,
+			expectMsgError:   5,
+			expectMsgNoError: 10,
+		},
+		{
+			name:             "all messages are invalid",
+			invalidSize:      5,
+			resStatusCode:    200,
+			resBody:          []byte(`{"successCount":5}`), // never called
+			expectApiCalls:   0,
+			expectErr:        false,
+			expectStatus:     StatusCannotRetry{},
+			expectMsgNoRetry: 5,
+			expectMsgRetry:   0,
+			expectMsgError:   5,
+			expectMsgNoError: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, transport := testListUnSubscribeHandler(tt.failCnt, tt.rateLimitCnt)
-			batch := generateListUnSubTestBatchMessages(10, tt.uniqueIds, tt.noEmailCnt)
-			res, err, retry := handler.ProcessBatch(batch)
+			transport := NewFakeTransport(0, 0)
+			transport.AddResponseQueue(tt.resStatusCode, tt.resBody)
+			handler := testListUnSubscribeHandler(transport)
+			batch := generateListUnSubTestBatch(tt.batchSize, false, 0)
+			for range tt.invalidSize {
+				batch = append(batch, Message{
+					Data: "invalid",
+				})
+			}
 
-			if tt.expectedErr {
+			res, err := handler.ProcessBatch(batch)
+
+			assert.Equal(t, tt.expectApiCalls, transport.reqCnt)
+			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
-			assert.Equal(t, tt.expectedResLen, len(res))
-			assert.Equal(t, tt.expectedRetry, retry)
-			assert.Equal(t, tt.expectedReqCnt, transport.reqCnt)
-			retryCount := 0
-			for _, r := range res {
-				if r.Retry {
-					retryCount++
-				}
+
+			if tt.expectStatus != nil {
+				assert.IsType(t, tt.expectStatus, res)
 			}
-			assert.Equal(t, tt.expectedIndividualRetry, retryCount)
+
+			msgNoRetry, msgRetry, msgNoErr, msgErr := countResponses(t, res.response())
+
+			assert.Equal(t, tt.expectMsgRetry, msgRetry)
+			assert.Equal(t, tt.expectMsgNoRetry, msgNoRetry)
+			assert.Equal(t, tt.expectMsgError, msgErr)
+			assert.Equal(t, tt.expectMsgNoError, msgNoErr)
 		})
 	}
 }
 
 func TestListUnSubscribeBatchHandler_ProcessBatch_DuplicateEmail(t *testing.T) {
-	handler, transport := testListUnSubscribeHandler(0, 0)
 	batch := []Message{
 		{
 			Data: &types.ListUnSubscribeRequest{
 				ListId: testListId,
 				Subscribers: []types.ListUnSubscriber{
-					{
-						Email: testEmail,
-					},
+					{Email: testEmail},
 				},
 			},
 		},
@@ -126,35 +263,29 @@ func TestListUnSubscribeBatchHandler_ProcessBatch_DuplicateEmail(t *testing.T) {
 			Data: &types.ListUnSubscribeRequest{
 				ListId: testListId,
 				Subscribers: []types.ListUnSubscriber{
-					{
-						Email: testEmail,
-					},
+					{Email: testEmail},
 				},
 			},
 		},
 	}
-	res, err, retry := handler.ProcessBatch(batch)
+	transport := NewFakeTransport(0, 0)
+	transport.AddResponseQueue(200, []byte(`{}`))
+	handler := testListUnSubscribeHandler(transport)
+
+	res, err := handler.ProcessBatch(batch)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(res))
-	assert.Equal(t, false, retry)
+	assert.IsType(t, StatusSuccess{}, res)
+	assert.Equal(t, 2, len(res.response()))
 
-	successCnt := 0
-	failCnt := 0
-	for _, r := range res {
-		if r.Error == nil {
-			successCnt++
-		} else {
-			failCnt++
-		}
-	}
-	assert.Equal(t, 2, successCnt)
-	assert.Equal(t, 0, failCnt)
-	assert.Equal(t, transport.reqCnt, 1)
+	msgNoRetry, msgRetry, msgNoErr, msgErr := countResponses(t, res.response())
+	assert.Equal(t, 0, msgNoRetry)
+	assert.Equal(t, 0, msgRetry)
+	assert.Equal(t, 2, msgNoErr)
+	assert.Equal(t, 0, msgErr)
 }
 
 func TestListUnSubscribeBatchHandler_ProcessBatch_DuplicateId(t *testing.T) {
-	handler, transport := testListUnSubscribeHandler(0, 0)
 	batch := []Message{
 		{
 			Data: &types.ListUnSubscribeRequest{
@@ -177,70 +308,215 @@ func TestListUnSubscribeBatchHandler_ProcessBatch_DuplicateId(t *testing.T) {
 			},
 		},
 	}
-	res, err, retry := handler.ProcessBatch(batch)
+	transport := NewFakeTransport(0, 0)
+	transport.AddResponseQueue(200, []byte(`{}`))
+	handler := testListUnSubscribeHandler(transport)
+
+	res, err := handler.ProcessBatch(batch)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(res))
-	assert.Equal(t, false, retry)
+	assert.IsType(t, StatusSuccess{}, res)
+	assert.Equal(t, 2, len(res.response()))
 
-	successCnt := 0
-	failCnt := 0
-	for _, r := range res {
-		if r.Error == nil {
-			successCnt++
-		} else {
-			failCnt++
-		}
-	}
-	assert.Equal(t, 2, successCnt)
-	assert.Equal(t, 0, failCnt)
-	assert.Equal(t, transport.reqCnt, 1)
+	msgNoRetry, msgRetry, msgNoErr, msgErr := countResponses(t, res.response())
+	assert.Equal(t, 0, msgNoRetry)
+	assert.Equal(t, 0, msgRetry)
+	assert.Equal(t, 2, msgNoErr)
+	assert.Equal(t, 0, msgErr)
 }
 
-func TestListUnSubscribeBatchHandler_ProcessBatch_InvalidData(t *testing.T) {
-	handler, transport := testListUnSubscribeHandler(0, 0)
-	batch := []Message{
-		{
-			Data: "invalid",
+func TestListUnSubscribeBatchHandler_ProcessBatch_PartialSuccess(t *testing.T) {
+	list1Res := types.ListUnSubscribeResponse{
+		FailedUpdates: types.FailedUpdates{
+			ConflictEmails:  []string{"email1@example.com"},
+			ConflictUserIds: []string{"email1"},
 		},
 	}
-	res, err, retry := handler.ProcessBatch(batch)
+	list2Res := types.ListUnSubscribeResponse{
+		FailedUpdates: types.FailedUpdates{
+			ForgottenEmails:    []string{"email2@example.com"},
+			ForgottenUserIds:   []string{"email2"},
+			InvalidDataEmails:  []string{"email3@example.com"},
+			InvalidDataUserIds: []string{"email3"},
+			InvalidEmails:      []string{"email4@example.com"},
+			InvalidUserIds:     []string{"email4"},
+		},
+	}
+	list3Res := types.ListUnSubscribeResponse{
+		FailedUpdates: types.FailedUpdates{
+			NotFoundEmails:  []string{"email5@example.com"},
+			NotFoundUserIds: []string{"email5"},
+		},
+	}
+	list4Res := types.ListUnSubscribeResponse{}
+	req := []Message{
+		{Data: "invalid"},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      1,
+			Subscribers: []types.ListUnSubscriber{{Email: "email1@example.com"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      1,
+			Subscribers: []types.ListUnSubscriber{{UserId: "email1"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      2,
+			Subscribers: []types.ListUnSubscriber{{Email: "email2@example.com"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      2,
+			Subscribers: []types.ListUnSubscriber{{UserId: "email2"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      2,
+			Subscribers: []types.ListUnSubscriber{{Email: "email3@example.com"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      2,
+			Subscribers: []types.ListUnSubscriber{{UserId: "email3"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      2,
+			Subscribers: []types.ListUnSubscriber{{Email: "email4@example.com"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      2,
+			Subscribers: []types.ListUnSubscriber{{UserId: "email4"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      3,
+			Subscribers: []types.ListUnSubscriber{{Email: "email5@example.com"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      3,
+			Subscribers: []types.ListUnSubscriber{{UserId: "email5"}},
+		}},
 
+		// Successful
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      3,
+			Subscribers: []types.ListUnSubscriber{{Email: "email6@example.com"}},
+		}},
+		{Data: &types.ListUnSubscribeRequest{
+			ListId:      4,
+			Subscribers: []types.ListUnSubscriber{{UserId: "email6"}},
+		}},
+	}
+
+	transport := NewFakeTransport(0, 0)
+
+	// expect 4 calls, because there are 4 distinct list ids
+	data1, _ := json.Marshal(list1Res)
+	data2, _ := json.Marshal(list2Res)
+	data3, _ := json.Marshal(list3Res)
+	data4, _ := json.Marshal(list4Res)
+	transport.AddResponseQueue(200, data1)
+	transport.AddResponseQueue(200, data2)
+	transport.AddResponseQueue(200, data3)
+	transport.AddResponseQueue(200, data4)
+
+	handler := testListUnSubscribeHandler(transport)
+	res, err := handler.ProcessBatch(req)
+
+	assert.Equal(t, 4, transport.reqCnt)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(res))
-	assert.Equal(t, false, retry)
-	assert.Equal(t, transport.reqCnt, 0)
+	assert.IsType(t, StatusPartialSuccess{}, res)
+	assert.Equal(t, len(req), len(res.response()))
 
-	assert.Error(t, res[0].Error)
+	msgNoRetry, msgRetry, msgNoErr, msgErr := countResponses(t, res.response())
+	assert.Equal(t, 0, msgRetry)
+	assert.Equal(t, 11, msgNoRetry)
+	assert.Equal(t, 11, msgErr)
+	assert.Equal(t, 2, msgNoErr)
 }
 
 func TestListUnSubscribeBatchHandler_ProcessOne(t *testing.T) {
-	handler, transport := testListUnSubscribeHandler(0, 0)
-	batch := generateListUnSubTestBatchMessages(10, false, 0)
-
-	res := make([]Response, 0, len(batch))
-	for _, req := range batch {
-		newRes := handler.ProcessOne(req)
-		assert.True(t, newRes.Retry)
-		res = append(res, newRes)
+	tests := []struct {
+		name           string
+		resStatusCode  int
+		resBody        []byte
+		expectApiCalls int
+		expectErr      bool
+		expectRetry    bool
+	}{
+		{
+			name:           "Success",
+			resStatusCode:  200,
+			resBody:        []byte(`{"code":"200"}`),
+			expectApiCalls: 1,
+		},
+		{
+			name:           "status:0",
+			resStatusCode:  0,
+			resBody:        []byte(`{}`),
+			expectApiCalls: 1,
+			expectErr:      true,
+			expectRetry:    true,
+		},
+		{
+			name:           "status:500",
+			resStatusCode:  500,
+			resBody:        []byte(`{}`),
+			expectApiCalls: 1,
+			expectErr:      true,
+			expectRetry:    true,
+		},
+		{
+			name:           "status:408",
+			resStatusCode:  408,
+			resBody:        []byte(`{}`),
+			expectApiCalls: 1,
+			expectErr:      true,
+			expectRetry:    true,
+		},
+		{
+			name:           "status:429",
+			resStatusCode:  408,
+			resBody:        []byte(`{}`),
+			expectApiCalls: 1,
+			expectErr:      true,
+			expectRetry:    true,
+		},
+		{
+			name:           "status:409",
+			resStatusCode:  409,
+			resBody:        []byte(`{}`),
+			expectApiCalls: 1,
+			expectErr:      true,
+			expectRetry:    false,
+		},
+		{
+			name:           "status:400",
+			resStatusCode:  400,
+			resBody:        []byte(`{}`),
+			expectApiCalls: 1,
+			expectErr:      true,
+			expectRetry:    false,
+		},
 	}
 
-	assert.Equal(t, 10, len(res))
-	assert.Equal(t, transport.reqCnt, 0)
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := NewFakeTransport(0, 0)
+			transport.AddResponseQueue(tt.resStatusCode, tt.resBody)
+			handler := testListUnSubscribeHandler(transport)
 
-func TestListUnSubscribeBatchHandler_ProcessOne_InvalidData(t *testing.T) {
-	handler, transport := testListUnSubscribeHandler(0, 0)
-	req := Message{
-		Data: "invalid",
+			req := generateListUnSubTestBatch(1, false, 0)[0]
+			res := handler.ProcessOne(req)
+
+			assert.ErrorIs(t, res.Error, ErrProcessOneNotAllowed)
+			assert.ErrorIs(t, res.Error, ErrClientMustRetryBatchApiErr)
+			var apiErr *iterable_errors.ApiError
+			ok := errors.As(res.Error, &apiErr)
+			require.True(t, ok)
+			assert.Equal(t, 500, apiErr.HttpStatusCode)
+			assert.True(t, res.Retry)
+			assert.Equal(t, 0, transport.reqCnt)
+		})
 	}
-	res := handler.ProcessOne(req)
-
-	assert.Equal(t, transport.reqCnt, 0)
-	assert.Error(t, res.Error)
 }
 
-func generateListUnSubTestBatchMessages(cnt int, uniqueIds bool, noEmailCnt int) []Message {
+func generateListUnSubTestBatch(cnt int, uniqueIds bool, noEmailCnt int) []Message {
 	var batch []Message
 	listId := testListId
 	for i := range cnt {
@@ -277,11 +553,10 @@ func generateListUnSubTestBatchMessages(cnt int, uniqueIds bool, noEmailCnt int)
 	return batch
 }
 
-func testListUnSubscribeHandler(failCnt int, rateLimitCnt int) (*listUnSubscribeHandler, *fakeTransport) {
-	transport := NewFakeTransport(failCnt, rateLimitCnt)
+func testListUnSubscribeHandler(transport http.RoundTripper) *listUnSubscribeHandler {
 	httpClient := http.Client{}
 	httpClient.Transport = transport
 	lists := api.NewListsApi("test", &httpClient, &logger.Noop{}, &rate.NoopLimiter{})
 	handler := NewListUnSubscribeBatchHandler(lists, &logger.Noop{})
-	return handler.(*listUnSubscribeHandler), transport
+	return handler.(*listUnSubscribeHandler)
 }

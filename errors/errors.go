@@ -15,9 +15,10 @@ const (
 	TYPE_HTTP_STATUS     = "not-ok-http-status"
 	TYPE_INVALID_DATA    = "invalid-data"
 
-	ITERABLE_NoUserWithIdExists = "error.users.noUserWithIdExists"
-	ITERABLE_InvalidList        = "error.lists.invalidListId"
-	ITERABLE_Success            = "Success"
+	ITERABLE_NoUserWithIdExists      = "error.users.noUserWithIdExists"
+	ITERABLE_InvalidList             = "error.lists.invalidListId"
+	ITERABLE_Success                 = "Success"
+	ITERABLE_FieldTypeMismatchErrStr = "RequestFieldsTypesMismatched"
 )
 
 type ApiError struct {

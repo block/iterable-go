@@ -1,7 +1,7 @@
 package batch
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/block/iterable-go/api"
 	"github.com/block/iterable-go/logger"
@@ -35,35 +35,46 @@ func NewUserEmailUpdateHandler(
 	}
 }
 
-func (s *userEmailUpdateHandler) ProcessBatch(batch []Message) ([]Response, error, bool) {
+func (s *userEmailUpdateHandler) ProcessBatch(batch []Message) (ProcessBatchResponse, error) {
 	var responses []Response
 	for _, req := range batch {
 		responses = append(responses, Response{
 			OriginalReq: req,
-			Error:       fmt.Errorf("batch processing not allowed for UserEmailUpdate"),
-			Retry:       true,
+			Error: errors.Join(
+				ErrProcessBatchNotAllowed,
+				ErrClientMustRetryOneApiErr,
+			),
+			Retry: true,
 		})
 	}
-	return responses, nil, false
+	return StatusRetryIndividual{responses}, nil
 }
 
 func (s *userEmailUpdateHandler) ProcessOne(req Message) Response {
 	var res Response
-	if subData, ok := req.Data.(*types.UserUpdateEmailRequest); ok {
+	if data, ok := req.Data.(*types.UserUpdateEmailRequest); ok {
 		// Transform BulkUpdateUser to UserRequest
-		_, err := s.client.UpdateEmail(subData.Email, subData.UserId, subData.NewEmail)
+		_, err := s.client.UpdateEmail(data.Email, data.UserId, data.NewEmail)
+		if err != nil {
+			s.logger.Debugf("Failed to process UserEmailUpdate/ProcessOne: %v", err)
+		}
+
 		res = Response{
 			OriginalReq: req,
 			Error:       err,
-			Retry:       shouldRetry(err),
+			Retry:       oneCanRetry(err),
 		}
 	} else {
-		s.logger.Errorf("Invalid data type in UserEmailUpdate batch request")
+		s.logger.Errorf("Invalid data type in UserEmailUpdate/ProcessOne: %t", req.Data)
 		res = Response{
 			OriginalReq: req,
-			Error:       InvalidDataErr,
+			Error: errors.Join(
+				ErrInvalidDataType,
+				ErrClientValidationApiErr,
+			),
 		}
 	}
+	s.logger.Debugf("Successfully sent UserUpdate/ProcessOne")
 
 	return res
 }

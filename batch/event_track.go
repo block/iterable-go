@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/block/iterable-go/logger"
@@ -8,20 +9,6 @@ import (
 	"github.com/block/iterable-go/api"
 	iterable_errors "github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/types"
-)
-
-const (
-	FieldTypeMismatchErr      = "RequestFieldsTypesMismatched"
-	DisallowedEventNameErrStr = "Disallowed Event Name"
-)
-
-var (
-	DisallowedEventNameErr = &iterable_errors.ApiError{
-		Stage:          iterable_errors.STAGE_REQUEST,
-		Type:           iterable_errors.TYPE_HTTP_STATUS,
-		HttpStatusCode: 400,
-		IterableCode:   DisallowedEventNameErrStr,
-	}
 )
 
 type eventTrackBatch struct {
@@ -54,67 +41,102 @@ func NewEventTrackHandler(client *api.Events, logger logger.Logger) Handler {
 	}
 }
 
-func (s *eventTrackHandler) ProcessBatch(batch []Message) ([]Response, error, bool) {
-	batchReq, responses := s.generatePayloads(batch)
+func (s *eventTrackHandler) ProcessBatch(batch []Message) (ProcessBatchResponse, error) {
+	req, cannotRetry := s.generatePayloads(batch)
 
-	res, err := s.Client.TrackBulk(batchReq.batch)
-	s.logger.Debugf("BulkTrackRequest response: %+v, err: %+v", res, err)
-	if err != nil {
-		// If there is a validation error, send all messages individually
-		if apiErr := err.(*iterable_errors.ApiError); apiErr != nil && apiErr.IterableCode == FieldTypeMismatchErr {
-			responses = addReqFailuresToResponses(batchReq.reqByEmailMap, responses, FieldTypeMismatchErr, true)
-			responses = addReqFailuresToResponses(batchReq.reqByUserIdMap, responses, FieldTypeMismatchErr, true)
-			return responses, nil, true
+	var result []Response
+	result = append(result, cannotRetry...)
+	if len(req.batch.Events) == 0 {
+		if len(cannotRetry) != 0 {
+			return StatusCannotRetry{result}, nil
 		}
-		return nil, err, shouldRetry(err)
-	} else {
-		responses = parseDisallowedEventNameFailures(res.DisallowedEventNames, batchReq, responses)
-		responses = parseReqFailures(res.FailedUpdates.InvalidEmails, batchReq.reqByEmailMap, responses, InvalidEmailsErr)
-		responses = parseReqFailures(res.FailedUpdates.InvalidUserIds, batchReq.reqByUserIdMap, responses, InvalidUserIdsErr)
-		responses = parseReqFailures(res.FailedUpdates.NotFoundEmails, batchReq.reqByEmailMap, responses, NotFoundEmailsErr)
-		responses = parseReqFailures(res.FailedUpdates.NotFoundUserIds, batchReq.reqByUserIdMap, responses, NotFoundUserIdsErr)
-		responses = parseReqFailures(res.FailedUpdates.ForgottenEmails, batchReq.reqByEmailMap, responses, ForgottenEmailsErr)
-		responses = parseReqFailures(res.FailedUpdates.ForgottenUserIds, batchReq.reqByUserIdMap, responses, ForgottenUserIdsErr)
-		responses = addReqSuccessToResponses(batchReq.reqByEmailMap, responses)
-		responses = addReqSuccessToResponses(batchReq.reqByUserIdMap, responses)
+		return StatusSuccess{result}, nil
 	}
 
-	return responses, nil, false
+	res, err := s.Client.TrackBulk(req.batch)
+	s.logger.Debugf("BulkTrackRequest response: %+v, err: %+v", res, err)
+	if err != nil {
+		var apiErr *iterable_errors.ApiError
+		if !errors.As(err, &apiErr) || apiErr == nil {
+			return nil, err
+		}
+
+		messages := flatValues(req.reqByEmailMap, req.reqByUserIdMap)
+
+		// If there is a validation error, send all messages individually
+		if apiErr.IterableCode == iterable_errors.ITERABLE_FieldTypeMismatchErrStr {
+			err2 := errors.Join(ErrFieldTypeMismatch, err)
+			result = append(result, toFailures(messages, err2, true)...)
+
+			return StatusRetryIndividual{result}, nil
+		}
+
+		return handleBatchError(apiErr, result, messages)
+	}
+
+	var sentAndFailed []Response
+	f := res.FailedUpdates
+
+	sentAndFailed = append(sentAndFailed, parseDisallowedEventNames(res.DisallowedEventNames, req.reqByEmailMap)...)
+	sentAndFailed = append(sentAndFailed, parseDisallowedEventNames(res.DisallowedEventNames, req.reqByUserIdMap)...)
+	sentAndFailed = append(sentAndFailed, parseFailures(f.InvalidEmails, req.reqByEmailMap, ErrInvalidEmails)...)
+	sentAndFailed = append(sentAndFailed, parseFailures(f.InvalidUserIds, req.reqByUserIdMap, ErrInvalidUserIds)...)
+	sentAndFailed = append(sentAndFailed, parseFailures(f.NotFoundEmails, req.reqByEmailMap, ErrNotFoundEmails)...)
+	sentAndFailed = append(sentAndFailed, parseFailures(f.NotFoundUserIds, req.reqByUserIdMap, ErrNotFoundUserIds)...)
+	sentAndFailed = append(sentAndFailed, parseFailures(f.ForgottenEmails, req.reqByEmailMap, ErrForgottenEmails)...)
+	sentAndFailed = append(sentAndFailed, parseFailures(f.ForgottenUserIds, req.reqByUserIdMap, ErrForgottenUserIds)...)
+
+	// Add success to remaining requests
+	result = append(result, sentAndFailed...)
+	result = append(result, toSuccess(req.reqByEmailMap)...)
+	result = append(result, toSuccess(req.reqByUserIdMap)...)
+
+	if len(cannotRetry) == 0 && len(sentAndFailed) == 0 {
+		return StatusSuccess{result}, nil
+	}
+	return StatusPartialSuccess{result}, nil
 }
 
 func (s *eventTrackHandler) ProcessOne(req Message) Response {
-	var res Response
-	if subData, ok := req.Data.(*types.EventTrackRequest); ok {
-		resp, err := s.Client.Track(*subData)
+	var result Response
+	if data, ok := req.Data.(*types.EventTrackRequest); ok {
+		res, err := s.Client.Track(*data)
 		if err != nil {
-			res = Response{
+			s.logger.Debugf("Failed to process EventTrack/ProcessOne: %v", err)
+			result = Response{
 				OriginalReq: req,
 				Error:       err,
-				Retry:       shouldRetry(err),
+				Retry:       oneCanRetry(err),
 			}
-		} else if isDisallowedEventName(resp.Message) {
-			res = Response{
+		} else if isDisallowedEventName(res.Message) {
+			s.logger.Debugf("DisallowedEventName in EventTrack/ProcessOne: %s", data.EventName)
+			result = Response{
 				OriginalReq: req,
-				Error:       DisallowedEventNameErr,
+				Error: errors.Join(
+					ErrDisallowedEventName,
+					ErrServerValidationApiErr,
+				),
 			}
 		} else {
-			res = Response{
+			result = Response{
 				OriginalReq: req,
 			}
 		}
 	} else {
-		s.logger.Errorf("Invalid data type in EventTrack batch request")
-		res = Response{
+		s.logger.Errorf("Invalid data type in EventTrack/ProcessOne: %t", req.Data)
+		result = Response{
 			OriginalReq: req,
-			Error:       InvalidDataErr,
+			Error: errors.Join(
+				ErrInvalidDataType,
+				ErrClientValidationApiErr,
+			),
 		}
 	}
-
-	return res
+	return result
 }
 
 func (s *eventTrackHandler) generatePayloads(messages []Message) (*eventTrackBatch, []Response) {
-	var responses []Response
+	var cannotRetry []Response
 	newBatch := newEventTrackBatch()
 	for _, req := range messages {
 		if event, ok := req.Data.(*types.EventTrackRequest); ok {
@@ -125,52 +147,17 @@ func (s *eventTrackHandler) generatePayloads(messages []Message) (*eventTrackBat
 			}
 			newBatch.batch.Events = append(newBatch.batch.Events, *event)
 		} else {
-			s.logger.Errorf("Invalid data type in EventTrack batch request")
-			responses = append(responses, Response{
+			s.logger.Errorf("Invalid data type in EventTrack/ProcessBatch: %t", req.Data)
+			cannotRetry = append(cannotRetry, Response{
 				OriginalReq: req,
-				Error:       InvalidDataErr,
+				Error:       ErrInvalidDataType,
 			})
 		}
 	}
 
-	return newBatch, responses
+	return newBatch, cannotRetry
 }
 
 func isDisallowedEventName(message string) bool {
-	// Returns true if message includes "is disallowed from tracking"
-	return strings.Contains(message, "is disallowed from tracking")
-}
-
-func parseDisallowedEventNameFailures(disallowedEventNames []string, batchReq *eventTrackBatch, responses []Response) []Response {
-	if len(disallowedEventNames) == 0 {
-		return responses
-	}
-
-	// Make a map of disallowed event names for faster lookup
-	disallowedEventNameMap := make(map[string]bool)
-	for _, name := range disallowedEventNames {
-		disallowedEventNameMap[name] = true
-	}
-
-	responses = parseMapForDisallowedEventName(disallowedEventNameMap, batchReq.reqByEmailMap, responses)
-	responses = parseMapForDisallowedEventName(disallowedEventNameMap, batchReq.reqByUserIdMap, responses)
-	return responses
-}
-
-func parseMapForDisallowedEventName(disallowedEventNameMap map[string]bool, reqMap map[string][]Message, responses []Response) []Response {
-	for key, reqSlice := range reqMap {
-		newReqSlice := make([]Message, 0, len(reqSlice))
-		for _, req := range reqSlice {
-			if _, ok := disallowedEventNameMap[req.Data.(*types.EventTrackRequest).EventName]; ok {
-				responses = append(responses, Response{
-					OriginalReq: req,
-					Error:       DisallowedEventNameErr,
-				})
-			} else {
-				newReqSlice = append(newReqSlice, req)
-			}
-		}
-		reqMap[key] = newReqSlice
-	}
-	return responses
+	return strings.Contains(message, errStrIsDisallowedFromTracking)
 }
