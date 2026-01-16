@@ -123,6 +123,18 @@ func (s *userUpdateHandler) ProcessOne(req Message) Response {
 		})
 		if err != nil {
 			s.logger.Debugf("Failed to process UserUpdate/ProcessOne: %v", err)
+
+			var apiErr *iterable_errors.ApiError
+			if errors.As(err, &apiErr) {
+				if apiErr.IterableCode == iterable_errors.ITERABLE_FieldTypeMismatchErrStr {
+					fields, _ := parsers.MismatchedFieldsParamsFromResponseBody(apiErr.Body)
+					err = errors.Join(
+						NewErrFieldTypeMismatch(fields),
+						ErrServerValidationApiErr,
+						err,
+					)
+				}
+			}
 		}
 
 		res = Response{

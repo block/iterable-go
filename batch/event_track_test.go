@@ -761,6 +761,143 @@ func TestEventTrackBatchHandler_ProcessOne_DisallowedEvent(t *testing.T) {
 	assert.False(t, res.Retry)
 }
 
+func TestEventTrackBatchHandler_ProcessOne_FieldTypeMismatch(t *testing.T) {
+	tests := []struct {
+		name           string
+		batchSize      int
+		resStatusCode  int
+		resBody        []byte
+		expectApiCalls int
+		expectStatus   ProcessBatchResponse
+		expectFields   types.MismatchedFieldsParams
+	}{
+		{
+			name:           "400 with empty validationErrors",
+			batchSize:      1,
+			resStatusCode:  400,
+			resBody:        []byte(`{"code":"RequestFieldsTypesMismatched"}`),
+			expectApiCalls: 1,
+			expectStatus:   StatusRetryIndividual{},
+			expectFields:   types.MismatchedFieldsParams{},
+		},
+		{
+			name:           "500 with empty validationErrors",
+			batchSize:      1,
+			resStatusCode:  500,
+			resBody:        []byte(`{"code":"RequestFieldsTypesMismatched"}`),
+			expectApiCalls: 1,
+			expectStatus:   StatusRetryIndividual{},
+			expectFields:   types.MismatchedFieldsParams{},
+		},
+		{
+			name:          "400 with non-empty validationErrors",
+			batchSize:     1,
+			resStatusCode: 400,
+			resBody: []byte(`{
+				"code":"RequestFieldsTypesMismatched",
+				"msg": "boo",
+				"params": {
+					"validationErrors": {
+						"my_project_etl:::soc_signup_at": {
+							"incomingTypes": ["string", "keyword"],
+							"expectedType": "date",
+							"category": "user",
+							"offendingValue": "2020-04-13 14:04:09.000",
+							"_type": "UnexpectedType"
+						}
+					}
+				}
+			}`),
+			expectApiCalls: 1,
+			expectStatus:   StatusRetryIndividual{},
+			expectFields: types.MismatchedFieldsParams{
+				ValidationErrors: types.MismatchedFieldsErrors{
+					"my_project_etl:::soc_signup_at": types.MismatchedFieldError{
+						IncomingTypes:  []string{"string", "keyword"},
+						ExpectedType:   "date",
+						Category:       "user",
+						OffendingValue: "2020-04-13 14:04:09.000",
+						Type:           "UnexpectedType",
+					},
+				},
+			},
+		},
+		{
+			name:          "400 with non-empty validationErrors with extra fields",
+			batchSize:     1,
+			resStatusCode: 400,
+			resBody: []byte(`{
+				"code":"RequestFieldsTypesMismatched",
+				"msg": "boo",
+				"params": {
+					"unknown": 1,
+					"validationErrors": {
+						"my_project_etl:::soc_signup_at": {
+							"incomingTypes": ["string", "keyword"],
+							"expectedType": "date",
+							"unknown": 1,
+							"invalid": "a"
+						}
+					}
+				}
+			}`),
+			expectApiCalls: 1,
+			expectStatus:   StatusRetryIndividual{},
+			expectFields: types.MismatchedFieldsParams{
+				ValidationErrors: types.MismatchedFieldsErrors{
+					"my_project_etl:::soc_signup_at": types.MismatchedFieldError{
+						IncomingTypes: []string{"string", "keyword"},
+						ExpectedType:  "date",
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := NewFakeTransport(0, 0)
+			transport.AddResponseQueue(tt.resStatusCode, tt.resBody)
+			handler := testEventTrackHandler(transport)
+			batch := generateEventTrackTestBatch(tt.batchSize)
+
+			res, err := handler.ProcessBatch(batch)
+			assert.Equal(t, tt.expectApiCalls, transport.reqCnt)
+			assert.NoError(t, err)
+
+			assert.IsType(t, tt.expectStatus, StatusRetryIndividual{})
+
+			for _, r := range res.response() {
+				assert.True(t, r.Retry)
+				assert.Error(t, r.Error)
+				assert.NotNil(t, r.OriginalReq)
+
+				allErr := Unwrap(r.Error)
+				assert.Equal(t, 2, len(allErr))
+
+				var err1 *ErrFieldTypeMismatchType
+				ok1 := errors.Is(r.Error, ErrFieldTypeMismatch)
+				ok2 := errors.As(r.Error, &err1)
+				assert.True(t, ok1)
+				assert.True(t, ok2)
+				assert.NotNil(t, err1)
+				ok := assert.ObjectsAreEqualValues(tt.expectFields, err1.MismatchedFields())
+				assert.True(t, ok)
+
+				var err2 *iterable_errors.ApiError
+				ok1 = errors.Is(r.Error, ErrApiError)
+				ok2 = errors.As(r.Error, &err2)
+				assert.True(t, ok1)
+				assert.True(t, ok2)
+				assert.NotNil(t, err2)
+				assert.Equal(t, tt.resStatusCode, err2.HttpStatusCode)
+
+				assert.True(t, errors.Is(r.Error, ErrServerValidationApiErr))
+			}
+		})
+	}
+}
+
 func generateEventTrackTestBatch(cnt int) []Message {
 	var batch []Message
 	for i := 0; i < cnt; i++ {

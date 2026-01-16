@@ -156,6 +156,9 @@ func oneCanRetry(err error) bool {
 	if !errors.As(err, &apiErr) {
 		return false
 	}
+	if errors.Is(err, ErrFieldTypeMismatch) {
+		return false
+	}
 
 	status := apiErr.HttpStatusCode
 	return status == 0 || // Request was not sent or context timed out
