@@ -67,7 +67,7 @@ func (s *eventTrackHandler) ProcessBatch(batch []Message) (ProcessBatchResponse,
 		// If there is a validation error, send all messages individually
 		if apiErr.IterableCode == iterable_errors.ITERABLE_FieldTypeMismatchErrStr {
 			fields, _ := parsers.MismatchedFieldsParamsFromResponseBody(apiErr.Body)
-			err2 := errors.Join(newErrFieldTypeMismatch(fields), err)
+			err2 := errors.Join(NewErrFieldTypeMismatch(fields), err)
 			result = append(result, toFailures(messages, err2, true)...)
 
 			return StatusRetryIndividual{result}, nil

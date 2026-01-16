@@ -118,7 +118,7 @@ func (e *ErrFieldTypeMismatchType) Is(other error) bool {
 
 var _ error = &ErrFieldTypeMismatchType{}
 
-func newErrFieldTypeMismatch(fields types.MismatchedFieldsParams) *ErrFieldTypeMismatchType {
+func NewErrFieldTypeMismatch(fields types.MismatchedFieldsParams) *ErrFieldTypeMismatchType {
 	return &ErrFieldTypeMismatchType{fields}
 }
 
