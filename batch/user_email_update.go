@@ -4,7 +4,9 @@ import (
 	"errors"
 
 	"github.com/block/iterable-go/api"
+	iterable_errors "github.com/block/iterable-go/errors"
 	"github.com/block/iterable-go/logger"
+	"github.com/block/iterable-go/parsers"
 	"github.com/block/iterable-go/types"
 )
 
@@ -57,6 +59,18 @@ func (s *userEmailUpdateHandler) ProcessOne(req Message) Response {
 		_, err := s.client.UpdateEmail(data.Email, data.UserId, data.NewEmail)
 		if err != nil {
 			s.logger.Debugf("Failed to process UserEmailUpdate/ProcessOne: %v", err)
+
+			var apiErr *iterable_errors.ApiError
+			if errors.As(err, &apiErr) {
+				if apiErr.IterableCode == iterable_errors.ITERABLE_FieldTypeMismatchErrStr {
+					fields, _ := parsers.MismatchedFieldsParamsFromResponseBody(apiErr.Body)
+					err = errors.Join(
+						NewErrFieldTypeMismatch(fields),
+						ErrServerValidationApiErr,
+						err,
+					)
+				}
+			}
 		}
 
 		res = Response{
