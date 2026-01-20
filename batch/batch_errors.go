@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	ErrStrBatchError                 = "Batch error"
 	ErrStrDisallowedEventName        = "Disallowed Event Name"
 	ErrStrConflictEmails             = "Email conflicts"
 	ErrStrConflictUserIds            = "UserId conflicts"
@@ -32,6 +33,7 @@ const (
 
 var (
 	ErrApiError                   = &iterable_errors.ApiError{}
+	ErrBatchError                 = errors.New(ErrStrBatchError)
 	ErrInvalidListId              = errors.New(ErrStrInvalidListId)
 	ErrConflictEmails             = errors.New(ErrStrConflictEmails)
 	ErrConflictUserIds            = errors.New(ErrStrConflictUserIds)
