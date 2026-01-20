@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -212,12 +213,16 @@ func (p *processor) process(batch []Message) {
 				return status.BatchErr, retry.Continue
 			case StatusCannotRetry:
 				for _, msgRes := range status.Response {
+					msgRes.Retry = false
+					msgRes.Error = errors.Join(ErrBatchError, msgRes.Error)
 					p.sendResponse(msgRes)
 				}
 				batchReq = nil
 				return nil, retry.StopNow
 			case StatusSuccess:
 				for _, msgRes := range status.Response {
+					msgRes.Retry = false
+					msgRes.Error = nil
 					p.sendResponse(msgRes)
 				}
 				batchReq = nil
@@ -226,8 +231,10 @@ func (p *processor) process(batch []Message) {
 				var retryOne []Response
 				for _, msgRes := range status.Response {
 					if msgRes.Error == nil {
+						msgRes.Retry = false
 						p.sendResponse(msgRes)
 					} else if !msgRes.Retry {
+						msgRes.Error = errors.Join(ErrBatchError, msgRes.Error)
 						p.sendResponse(msgRes)
 					} else {
 						retryOne = append(retryOne, msgRes)
@@ -239,6 +246,7 @@ func (p *processor) process(batch []Message) {
 			case StatusRetryIndividual:
 				var retryOne []Response
 				for _, msgRes := range status.Response {
+					msgRes.Retry = true
 					retryOne = append(retryOne, msgRes)
 				}
 				p.retryIndividual(retryOne)
@@ -249,7 +257,7 @@ func (p *processor) process(batch []Message) {
 				for _, msgReq := range batchReq {
 					p.sendResponse(Response{
 						OriginalReq: msgReq,
-						Error:       ErrInvalidBatchProcessorState,
+						Error:       errors.Join(ErrBatchError, ErrInvalidBatchProcessorState),
 						Retry:       false,
 					})
 				}
@@ -264,7 +272,7 @@ func (p *processor) process(batch []Message) {
 	for _, msgReq := range batchReq {
 		p.sendResponse(Response{
 			OriginalReq: msgReq,
-			Error:       loopErr,
+			Error:       errors.Join(ErrBatchError, loopErr),
 			Retry:       true,
 		})
 	}
@@ -276,6 +284,7 @@ func (p *processor) retryIndividual(retryOne []Response) {
 		g := errgroup.Group{}
 		g.SetLimit(p.config.NumOfIndividualGoroutines)
 		for _, res := range retryOne {
+			res.Error = errors.Join(ErrBatchError, res.Error)
 			if p.config.sendIndividual {
 				g.Go(func() error {
 					resOne := p.handler.ProcessOne(res.OriginalReq)

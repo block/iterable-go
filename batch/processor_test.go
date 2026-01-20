@@ -3,6 +3,7 @@ package batch
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"sync"
@@ -193,6 +194,7 @@ func TestBatchProcessor_batchSizes(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := newFakeBatchHandler()
+
 			cfg := testBatchProcessorConfig(IsFalse)
 			cfg.FlushQueueSize = tt.batchSize
 
@@ -390,6 +392,758 @@ func TestBatchProcessor_batch_fails_send_one_is_disabled_2(t *testing.T) {
 	assert.Equal(t, 0, handler.nonBatchReqCount)
 	assert.Equal(t, 2, len(res))
 	assertFailedMessages(t, 1, res)
+}
+
+func TestBatchProcessor_errors_Join_and_Is_work(t *testing.T) {
+	err1 := errors.Join(ErrBatchError, fmt.Errorf("boo"))
+	err2 := errors.Join(errors.Join(ErrBatchError), fmt.Errorf("boo"))
+	err3 := errors.Join(errors.Join(ErrBatchError, nil), fmt.Errorf("boo"))
+
+	assert.ErrorIs(t, err1, ErrBatchError)
+	assert.True(t, errors.Is(err1, ErrBatchError))
+	assert.ErrorIs(t, err2, ErrBatchError)
+	assert.True(t, errors.Is(err2, ErrBatchError))
+	assert.ErrorIs(t, err3, ErrBatchError)
+	assert.True(t, errors.Is(err3, ErrBatchError))
+}
+
+func TestBatchProcessor_errors(t *testing.T) {
+	testCases := []struct {
+		name                string
+		sendIndividual      bool
+		messages            []Message
+		batchResponseQ      []fakeBatchResponse
+		oneResponseQ        []Response
+		expectBatchReqCount int
+		expectOneReqCount   int
+		expectMsg           []string
+		expectMsgRetry      []string
+		expectMsgErr        []string
+		expectBatchErr      []string
+
+		expectMsgRetryCount int
+		expectMsgErrorCount int
+		expectBatchErrType  int
+	}{
+		{
+			name: "StatusSuccess",
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusSuccess{
+						Response: []Response{
+							{Data: "1", OriginalReq: Message{Data: "1"}},
+							{Data: "2", OriginalReq: Message{Data: "2"}},
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{},
+		},
+		{
+			name: "batch error",
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: nil,
+					err: errors.New("generic batch error"),
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{"1", "2"},
+			expectMsgErr:        []string{"1", "2"},
+			expectBatchErr:      []string{"1", "2"},
+		},
+		{
+			name: "StatusRetryBatch, StatusSuccess",
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusRetryBatch{
+						BatchErr: errors.New("fail"),
+						Response: []Response{
+							{Data: "1", OriginalReq: Message{Data: "1"}},
+							{Data: "2", OriginalReq: Message{Data: "2"}},
+						},
+					},
+					err: nil,
+				},
+				{
+					res: StatusSuccess{
+						Response: []Response{
+							{Data: "1", OriginalReq: Message{Data: "1"}},
+							{Data: "2", OriginalReq: Message{Data: "2"}},
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 2,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name:           "StatusSuccess - with errors and retries",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusSuccess{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Error:       errors.New("fail 1"), // will be set to nil
+								Retry:       false,
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+								Error:       errors.New("fail 2"), // will be set to nil
+								Retry:       true,                 // will be set to false
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name: "StatusRetryBatch, StatusRetryBatch",
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusRetryBatch{
+						BatchErr: errors.New("fail 1"),
+						Response: []Response{
+							{Data: "1", OriginalReq: Message{Data: "1"}},
+							{Data: "2", OriginalReq: Message{Data: "2"}},
+						},
+					},
+					err: nil,
+				},
+				{
+					res: StatusRetryBatch{
+						BatchErr: errors.New("fail 2"),
+						Response: []Response{
+							{Data: "1", OriginalReq: Message{Data: "1"}},
+							{Data: "2", OriginalReq: Message{Data: "2"}},
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 2,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{"1", "2"},
+			expectMsgErr:        []string{"1", "2"},
+			expectBatchErr:      []string{"1", "2"},
+		},
+		{
+			name: "StatusCannotRetry",
+			messages: []Message{
+				{Data: "1"}, {Data: "2"}, {Data: "3"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusCannotRetry{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Retry:       true, // this should be set to false
+								Error:       errors.New("fail 1"),
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+							},
+							{
+								Data:        "3",
+								OriginalReq: Message{Data: "3"},
+								Error:       errors.New("fail 3"),
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2", "3"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{"1", "2", "3"},
+			expectBatchErr:      []string{"1", "2", "3"},
+		},
+		{
+			name: "StatusRetryBatch, StatusCannotRetry",
+			messages: []Message{
+				{Data: "1"}, {Data: "2"}, {Data: "3"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusRetryBatch{
+						BatchErr: errors.New("fail batch 1"),
+						Response: []Response{
+							{Data: "1", OriginalReq: Message{Data: "1"}},
+							{Data: "2", OriginalReq: Message{Data: "2"}},
+							{Data: "3", OriginalReq: Message{Data: "3"}},
+						},
+					},
+					err: nil,
+				},
+				{
+					res: StatusCannotRetry{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Retry:       true, // this should be set to false
+								Error:       errors.New("fail 1"),
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+							},
+							{
+								Data:        "3",
+								OriginalReq: Message{Data: "3"},
+								Error:       errors.New("fail 3"),
+							},
+						},
+					},
+					err: nil,
+				},
+				{
+					res: StatusRetryBatch{
+						BatchErr: errors.New("fail 2"),
+						Response: []Response{
+							{Data: "1", OriginalReq: Message{Data: "1"}},
+							{Data: "2", OriginalReq: Message{Data: "2"}},
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 2,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2", "3"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{"1", "2", "3"},
+			expectBatchErr:      []string{"1", "2", "3"},
+		},
+		{
+			name:           "StatusPartialSuccess, sendIndividual:false",
+			sendIndividual: false,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"}, {Data: "3"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusPartialSuccess{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Error:       errors.New("fail 1"),
+								Retry:       false,
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+								Error:       errors.New("fail 2"),
+								Retry:       true,
+							},
+							{
+								Data:        "3",
+								OriginalReq: Message{Data: "3"},
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			oneResponseQ: []Response{
+				{
+					Data:        "1",
+					OriginalReq: Message{Data: "1"},
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2", "3"},
+			expectMsgRetry:      []string{"2"},
+			expectMsgErr:        []string{"1", "2"},
+			expectBatchErr:      []string{"1", "2"},
+		},
+		{
+			name:           "StatusPartialSuccess, sendIndividual:true",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"}, {Data: "3"}, {Data: "4"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusPartialSuccess{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Error:       errors.New("fail 1"),
+								Retry:       false,
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+								Error:       errors.New("fail 2"),
+								Retry:       true,
+							},
+							{
+								Data:        "3",
+								OriginalReq: Message{Data: "3"},
+								Retry:       true, // will be set to false, because Error is nil
+							},
+							{
+								Data:        "4",
+								OriginalReq: Message{Data: "4"},
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			oneResponseQ: []Response{
+				{
+					Data:        "2",
+					OriginalReq: Message{Data: "2"},
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   1,
+			expectMsg:           []string{"1", "2", "3", "4"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{"1"},
+			expectBatchErr:      []string{"1"},
+		},
+		{
+			name:           "StatusPartialSuccess - no errors",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusPartialSuccess{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name:           "StatusPartialSuccess - all errors, sendIndividual:true",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusPartialSuccess{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Error:       errors.New("fail 1"),
+								Retry:       true,
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+								Error:       errors.New("fail 2"),
+								Retry:       true,
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			oneResponseQ: []Response{
+				{
+					Data:        "1",
+					OriginalReq: Message{Data: "1"},
+				},
+				{
+					Data:        "2",
+					OriginalReq: Message{Data: "2"},
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   2,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name:           "StatusPartialSuccess - empty",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusPartialSuccess{
+						Response: []Response{
+							// this should never happen, but if it does,
+							// let's make sure Processor doesn't panic
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name:           "StatusRetryIndividual, sendIndividual:false",
+			sendIndividual: false,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"}, {Data: "3"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusRetryIndividual{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Error:       errors.New("fail 1"),
+								Retry:       false,
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+								Error:       errors.New("fail 2"),
+								Retry:       true,
+							},
+							{
+								Data:        "3",
+								OriginalReq: Message{Data: "3"},
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2", "3"},
+			expectMsgRetry:      []string{"1", "2", "3"},
+			expectMsgErr:        []string{"1", "2", "3"},
+			expectBatchErr:      []string{"1", "2", "3"},
+		},
+		{
+			name:           "StatusRetryIndividual, sendIndividual:true",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"}, {Data: "3"}, {Data: "4"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusRetryIndividual{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Error:       errors.New("fail 1"),
+								Retry:       false,
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+								Error:       errors.New("fail 2"),
+								Retry:       true,
+							},
+							{
+								Data:        "3",
+								OriginalReq: Message{Data: "3"},
+								Retry:       true, // will be set to false, because Error is nil
+							},
+							{
+								Data:        "4",
+								OriginalReq: Message{Data: "4"},
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			oneResponseQ: []Response{
+				{
+					Data:        "1",
+					OriginalReq: Message{Data: "1"},
+				},
+				{
+					Data:        "2",
+					OriginalReq: Message{Data: "2"},
+				},
+				{
+					Data:        "3",
+					OriginalReq: Message{Data: "3"},
+				},
+				{
+					Data:        "4",
+					OriginalReq: Message{Data: "4"},
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   4,
+			expectMsg:           []string{"1", "2", "3", "4"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name:           "StatusRetryIndividual - no errors, sendIndividual: true",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusRetryIndividual{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			oneResponseQ: []Response{
+				{
+					Data:        "1",
+					OriginalReq: Message{Data: "1"},
+				},
+				{
+					Data:        "2",
+					OriginalReq: Message{Data: "2"},
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   2,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name:           "StatusRetryIndividual - all errors, sendIndividual:true",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusRetryIndividual{
+						Response: []Response{
+							{
+								Data:        "1",
+								OriginalReq: Message{Data: "1"},
+								Error:       errors.New("fail 1"),
+								Retry:       true,
+							},
+							{
+								Data:        "2",
+								OriginalReq: Message{Data: "2"},
+								Error:       errors.New("fail 2"),
+								Retry:       false,
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+			oneResponseQ: []Response{
+				{
+					Data:        "1",
+					OriginalReq: Message{Data: "1"},
+				},
+				{
+					Data:        "2",
+					OriginalReq: Message{Data: "2"},
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   2,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name:           "StatusRetryIndividual - empty",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{
+					res: StatusRetryIndividual{
+						Response: []Response{
+							// this should never happen, but if it does,
+							// let's make sure Processor doesn't panic
+						},
+					},
+					err: nil,
+				},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{},
+			expectBatchErr:      []string{},
+		},
+		{
+			name:           "InvalidBatchResponse",
+			sendIndividual: true,
+			messages: []Message{
+				{Data: "1"}, {Data: "2"},
+			},
+			batchResponseQ: []fakeBatchResponse{
+				{res: invalidBatchResponse{}},
+			},
+			expectBatchReqCount: 1,
+			expectOneReqCount:   0,
+			expectMsg:           []string{"1", "2"},
+			expectMsgRetry:      []string{},
+			expectMsgErr:        []string{"1", "2"},
+			expectBatchErr:      []string{"1", "2"},
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := newFakeBatchHandler()
+			handler.processBatchQ = tt.batchResponseQ
+
+			cfg := testBatchProcessorConfig(IsFalse)
+			cfg.MaxBufferSize = 10
+			cfg.MaxRetries = 2
+			if tt.sendIndividual {
+				cfg.SendIndividual = IsTrue
+			} else {
+				cfg.SendIndividual = IsFalse
+			}
+
+			p, resChan := testBatchProcessor(
+				handler, cfg,
+			)
+
+			for _, m := range tt.messages {
+				p.Add(m)
+			}
+
+			p.Start()
+			p.Stop()
+
+			res := getMessagesOffChan(resChan)
+
+			assert.NotNil(t, res)
+			assert.Equal(t, tt.expectBatchReqCount, handler.batchReqCount)
+			assert.Equal(t, tt.expectOneReqCount, handler.nonBatchReqCount)
+
+			assert.Equal(t, len(tt.expectMsg), len(res))
+			for _, r := range res {
+				data := r.OriginalReq.Data.(string)
+				assert.Contains(t, tt.expectMsg, data)
+				idx := slices.Index(tt.expectMsg, data)
+				if idx > -1 {
+					tt.expectMsg = slices.Delete(tt.expectMsg, idx, idx+1)
+				}
+
+				if r.Retry {
+					assert.Contains(t, tt.expectMsgRetry, data)
+					idx = slices.Index(tt.expectMsgRetry, data)
+					if idx > -1 {
+						tt.expectMsgRetry = slices.Delete(tt.expectMsgRetry, idx, idx+1)
+					}
+				}
+
+				if r.Error != nil {
+					assert.Contains(t, tt.expectMsgErr, data)
+					idx = slices.Index(tt.expectMsgErr, data)
+					if idx > -1 {
+						tt.expectMsgErr = slices.Delete(tt.expectMsgErr, idx, idx+1)
+					}
+				}
+
+				if errors.Is(r.Error, ErrBatchError) {
+					assert.Contains(t, tt.expectBatchErr, data)
+					idx = slices.Index(tt.expectBatchErr, data)
+					if idx > -1 {
+						tt.expectBatchErr = slices.Delete(tt.expectBatchErr, idx, idx+1)
+					}
+				}
+			}
+			assert.Empty(t, tt.expectMsg)
+			assert.Empty(t, tt.expectMsgRetry)
+			assert.Empty(t, tt.expectMsgErr)
+			assert.Empty(t, tt.expectBatchErr)
+		})
+	}
 }
 
 func TestBatchProcessor_nil_response_chan(t *testing.T) {
@@ -651,10 +1405,18 @@ func getMessagesOffChan(c chan Response) []Response {
 	return msgs
 }
 
+type fakeBatchResponse struct {
+	res ProcessBatchResponse
+	err error
+}
+
 type fakeBatchHandler struct {
-	batchReqCount         int
-	nonBatchReqCount      int
-	totalBatchMessages    int
+	batchReqCount      int
+	nonBatchReqCount   int
+	totalBatchMessages int
+	processBatchQ      []fakeBatchResponse
+	processOneQ        []Response
+
 	shouldFailBatch       func() bool
 	shouldRetryBatch      func() bool
 	shouldRetryOnePartial func(any) bool
@@ -694,6 +1456,22 @@ func (f *fakeBatchHandler) ProcessBatch(batch []Message) (ProcessBatchResponse, 
 
 	f.batchReqCount++
 	f.totalBatchMessages += len(batch)
+
+	if len(f.processBatchQ) > 0 {
+		batchRes := f.processBatchQ[0]
+		f.processBatchQ = f.processBatchQ[1:]
+		f.processBatchQ = append(
+			f.processBatchQ,
+			// the test should never reach this point
+			// if it does - we must return an error to make sure
+			// the 2 ways of handling responses don't affect each other's results
+			fakeBatchResponse{
+				err: errors.New("cannot mix processBatchQ with 'shouldFail'"),
+			},
+		)
+		return batchRes.res, batchRes.err
+	}
+
 	res := make([]Response, 0)
 	failBatch := false
 	retryBatch := false
@@ -756,6 +1534,27 @@ func (f *fakeBatchHandler) ProcessOne(req Message) Response {
 	defer f.mu.Unlock()
 
 	f.nonBatchReqCount++
+
+	var res Response
+	if len(f.processOneQ) > 0 {
+		res = f.processOneQ[0]
+		f.processOneQ = f.processOneQ[1:]
+		// the test should never reach this point
+		// if it does - we must return an error to make sure
+		// the 2 ways of handling responses don't affect each other's results
+		f.processOneQ = append(
+			f.processOneQ, Response{
+				Data: "cannot mix processBatchQ with 'shouldFail'",
+				OriginalReq: Message{
+					Data: "cannot mix processBatchQ with 'shouldFail'",
+				},
+				Error: errors.New("cannot mix processBatchQ with 'shouldFail'"),
+				Retry: true,
+			},
+		)
+		return res
+	}
+
 	if f.shouldFailOne() {
 		return Response{
 			Error:       errors.New("failed"),
@@ -806,3 +1605,11 @@ var _ retry.Retry = &fakeRetry{}
 func (f fakeRetry) Do(_ int, _ string, _ retry.RetriableFn) error {
 	return nil
 }
+
+type invalidBatchResponse struct{}
+
+func (r invalidBatchResponse) response() []Response {
+	return nil
+}
+
+var _ ProcessBatchResponse = &invalidBatchResponse{}
