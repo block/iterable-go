@@ -406,6 +406,29 @@ func TestUsers_GetById(t *testing.T) {
 			expectFound: true,
 		},
 		{
+			name:   "user found with profileUpdatedAt",
+			userId: "789",
+			resBody: []byte(`{
+				"user": {
+					"email": "test@example.com",
+					"userId": "789",
+					"dataFields": {"firstName": "Test"},
+					"profileUpdatedAt": "2026-07-13T10:00:00Z"
+				}
+			}`),
+			resCode:   200,
+			expectUrl: "https://api.iterable.com/api/users/byUserId?userId=789",
+			expectRes: &types.User{
+				Email:  "test@example.com",
+				UserId: "789",
+				DataFields: map[string]interface{}{
+					"firstName": "Test",
+				},
+				ProfileUpdatedAt: "2026-07-13T10:00:00Z",
+			},
+			expectFound: true,
+		},
+		{
 			name:        "user not found",
 			userId:      "456",
 			resBody:     []byte(`{"code": "error.users.noUserWithIdExists", "msg": "User not found"}`),
