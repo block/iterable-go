@@ -1,9 +1,10 @@
 package types
 
 type User struct {
-	Email      string                 `json:"email"`
-	UserId     string                 `json:"userId"`
-	DataFields map[string]interface{} `json:"dataFields"`
+	Email            string                 `json:"email"`
+	UserId           string                 `json:"userId"`
+	DataFields       map[string]interface{} `json:"dataFields"`
+	ProfileUpdatedAt string                 `json:"profileUpdatedAt,omitempty"`
 }
 
 type UserSentMessage struct {
