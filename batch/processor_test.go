@@ -1342,17 +1342,19 @@ func TestBatchProcessor_Stop_Add_race(t *testing.T) {
 	for i := range msgCnt {
 		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			p.Add(Message{
 				Data: strconv.Itoa(i),
 			})
-			wg.Done()
 		}()
 		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			p.Stop()
 			p.Start()
 		}()
 	}
+	wg.Wait()
 
 	// last Stop() guarantees all messages are delivered
 	p.Stop()
